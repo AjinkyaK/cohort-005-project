@@ -1,6 +1,6 @@
 # Team Licences are refunded whole, judged only by Claimed Seats, and their Seats are held during review
 
-A Refund Request on a Team Licence is for the whole Licence. It is eligible only while no Seat has been claimed, and the Team Admin claiming one themselves counts. While the request is Open, every Seat is a Held Seat and cannot be claimed. Declining makes the Seats Available again, and approving makes them Void. This means approval never ends anyone else's Enrollment: a Platform Admin only ever decides on a Licence nobody is using. The Watch Limit and Completion Limit do not apply to Team Licences, because they measure the buyer's own viewing, which says nothing about whether the team used the Seats. The Claimed Seat is the only sign of use that matters, and the Refund Amount is what was paid.
+A Refund Request on a Team Licence is for the whole Licence. It is eligible only while no Seat has been claimed, and the Team Admin claiming one themselves counts. While the request is Open, every Seat is a Held Seat and cannot be claimed. Declining makes the Seats Available again, and approving makes them Void. Approving a Team Licence therefore never ends an Enrollment: by the time a Platform Admin decides, none of its Seats has been claimed, so nobody is using it. The Watch Limit and Completion Limit do not apply to Team Licences, because they measure the buyer's own viewing, which says nothing about whether the team used the Seats. The Claimed Seat is the only sign of use that matters, and the Refund Amount is what was paid.
 
 ## Considered Options
 
