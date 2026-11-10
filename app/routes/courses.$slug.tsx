@@ -899,7 +899,7 @@ function RefundRequestForm({
           className="w-full text-muted-foreground"
           onClick={() => setIsFormOpen(true)}
         >
-          Cancel my purchase
+          Request a refund
         </Button>
       </div>
     );
@@ -907,10 +907,10 @@ function RefundRequestForm({
 
   return (
     <div className="border-t pt-4">
-      <p className="mb-2 text-sm font-medium">Cancel my purchase</p>
+      <p className="mb-2 text-sm font-medium">Request a refund</p>
       <p className="mb-3 text-xs text-muted-foreground">
-        We will send {formatPrice(refundAmount)} back to the card you paid with, once
-        someone has read your note.
+        If we approve your request, we'll refund {formatPrice(refundAmount)} to
+        the card you paid with. Someone on our team reads every request.
       </p>
       <fetcher.Form
         method="post"
@@ -925,7 +925,7 @@ function RefundRequestForm({
         />
         <div className="flex gap-2">
           <Button type="submit" size="sm" disabled={isSubmitting}>
-            {isSubmitting ? "Sending..." : "Cancel my purchase"}
+            {isSubmitting ? "Sending..." : "Send refund request"}
           </Button>
           <Button
             type="button"
@@ -933,7 +933,7 @@ function RefundRequestForm({
             size="sm"
             onClick={() => setIsFormOpen(false)}
           >
-            Keep it
+            Never mind
           </Button>
         </div>
       </fetcher.Form>
