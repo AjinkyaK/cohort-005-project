@@ -23,7 +23,7 @@ _Avoid_: Coupon, code (for the Seat itself), Unclaimed Seat (it lumps together A
 A Seat that can be claimed right now: nobody has claimed it, and its Team Licence has neither an Open nor an Approved Refund Request.
 
 **Enrollment**:
-A learner's access to a course. It can come from an Individual Purchase or from a Claimed Seat, so being enrolled does not mean a learner bought the course. It ends the moment the Refund Request on the Purchase behind it is Approved, and not before; the learner's progress is kept.
+A learner's access to a course. It can come from an Individual Purchase or from a Claimed Seat, so being enrolled does not mean a learner bought the course. A learner has at most one Enrollment per course, and it does not record where it came from. It ends when a Refund Request on the learner's Individual Purchase of the course is Approved, and not before, unless they also hold a Claimed Seat on that course; either way, the learner's progress is kept.
 _Avoid_: Registration, subscription
 
 ## Refunds
@@ -115,4 +115,4 @@ A Seat on a Refunded Team Licence. It was never claimed and never can be.
 _Avoid_: Cancelled seat, revoked seat, expired seat
 
 **Refunded Purchase**:
-A Purchase with an Approved Refund Request. An Individual Purchase's Enrollment ends; every Seat on a Team Licence becomes Void. Buying the course again creates a new Purchase with its own Refund Window.
+A Purchase with an Approved Refund Request. The buyer's Enrollment in the course ends, unless they also hold a Claimed Seat on it; every Seat on a Team Licence becomes Void. Buying the course again creates a new Purchase with its own Refund Window.
