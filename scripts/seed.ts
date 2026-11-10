@@ -11,6 +11,8 @@ import {
   CourseStatus,
   LessonProgressStatus,
   QuestionType,
+  RefundStatus,
+  PaymentTransferStatus,
   TeamMemberRole,
 } from "../app/db/schema";
 
@@ -29,6 +31,12 @@ const db = drizzle(sqlite, { schema });
 function daysAgo(n: number): string {
   const d = new Date();
   d.setDate(d.getDate() - n);
+  return d.toISOString();
+}
+
+function daysAfter(iso: string, n: number): string {
+  const d = new Date(iso);
+  d.setDate(d.getDate() + n);
   return d.toISOString();
 }
 
@@ -2429,6 +2437,7 @@ This course is still in draft while the cluster examples are rewritten against t
   let generatedPurchases = 0;
   let generatedEnrollments = 0;
   let generatedProgressRows = 0;
+  const generatedPurchaseRows: (typeof schema.purchases.$inferSelect)[] = [];
 
   // A student buys, enrols, and works through the course as far as they get.
   // Returns false if there was nothing they could have bought on that day — a
@@ -2459,7 +2468,8 @@ This course is still in draft while the cluster examples are rewritten against t
       ? Math.round((target.course.price * 0.5) / 100) * 100
       : target.course.price;
 
-    db.insert(schema.purchases)
+    const generatedPurchase = db
+      .insert(schema.purchases)
       .values({
         userId: buyer.id,
         courseId: target.course.id,
@@ -2467,7 +2477,9 @@ This course is still in draft while the cluster examples are rewritten against t
         country,
         createdAt: daysAgo(purchasedDaysAgo),
       })
-      .run();
+      .returning()
+      .get();
+    generatedPurchaseRows.push(generatedPurchase);
     generatedPurchases++;
 
     db.insert(schema.enrollments)
@@ -2772,6 +2784,84 @@ This course is still in draft while the cluster examples are rewritten against t
     })
     .run();
 
+  // ─── Refunds ───
+  // One Approved Refund for each Payment Transfer Status, plus a Declined and an
+  // Open request, which have no Payment Transfer Status. The in-flight transfers
+  // and the Open request come last, so they land on recent purchases.
+  //
+  // All sit on generated purchases, so the hand-written students' purchases
+  // (Liam's included) carry no Refund Request. Picked by position in the
+  // generated history, which the fixed PRNG seed keeps stable between runs.
+
+  const refundCases: {
+    status: RefundStatus;
+    paymentTransferStatus: PaymentTransferStatus | null;
+    reason: string;
+  }[] = [
+    {
+      status: RefundStatus.Approved,
+      paymentTransferStatus: PaymentTransferStatus.Succeeded,
+      reason: "I bought the wrong course by mistake.",
+    },
+    {
+      status: RefundStatus.Approved,
+      paymentTransferStatus: PaymentTransferStatus.Failed,
+      reason: "The course was more basic than I expected.",
+    },
+    {
+      status: RefundStatus.Approved,
+      paymentTransferStatus: PaymentTransferStatus.Canceled,
+      reason: "I don't have time to take it right now.",
+    },
+    {
+      status: RefundStatus.Declined,
+      paymentTransferStatus: null,
+      reason: "I finished it and want my money back.",
+    },
+    {
+      status: RefundStatus.Approved,
+      paymentTransferStatus: PaymentTransferStatus.Pending,
+      reason: "My employer is covering this through a team purchase instead.",
+    },
+    {
+      status: RefundStatus.Approved,
+      paymentTransferStatus: PaymentTransferStatus.RequiresAction,
+      reason: "The videos won't play reliably on my connection.",
+    },
+    {
+      status: RefundStatus.Open,
+      paymentTransferStatus: null,
+      reason: "It doesn't cover the framework I was hoping to learn.",
+    },
+  ];
+
+  const refundStride = Math.floor(
+    generatedPurchaseRows.length / refundCases.length
+  );
+
+  refundCases.forEach((refundCase, i) => {
+    const purchase = generatedPurchaseRows[i * refundStride];
+    const resolved = refundCase.status !== RefundStatus.Open;
+
+    db.insert(schema.refunds)
+      .values({
+        purchaseId: purchase.id,
+        status: refundCase.status,
+        reason: refundCase.reason,
+        amountRefunded:
+          refundCase.status === RefundStatus.Approved
+            ? purchase.amountPaid
+            : null,
+        requestedAt: daysAfter(purchase.createdAt, 3),
+        resolvedAt: resolved ? daysAfter(purchase.createdAt, 5) : null,
+        resolvedByUserId: resolved ? admin.id : null,
+        paymentTransferStatus: refundCase.paymentTransferStatus,
+      })
+      .run();
+  });
+
+  console.log(`Created ${countRows(schema.refunds)} refund requests.`);
+
   // ─── Flush watch events ───
   // Batched: the heartbeat makes these by far the largest table, and one
   // statement per row would dominate the seed's runtime.
@@ -2822,6 +2912,9 @@ This course is still in draft while the cluster examples are rewritten against t
   );
   console.log(
     `  Purchases: ${countRows(schema.purchases)} (${countRows(schema.purchases, gte(schema.purchases.createdAt, sevenDaysAgo))} in the last 7 days), spanning ${historyDays} days`
+  );
+  console.log(
+    `  Refund requests: ${countRows(schema.refunds)} (${countRows(schema.refunds, isNotNull(schema.refunds.paymentTransferStatus))} with a Payment Transfer Status)`
   );
   console.log(
     `  Teams: ${countRows(schema.teams)}, coupons: ${countRows(schema.coupons)} (${countRows(schema.coupons, isNotNull(schema.coupons.redeemedByUserId))} redeemed)`
