@@ -3,28 +3,14 @@ import { z } from "zod";
 import type { Route } from "./+types/courses.$slug.refund";
 import { getCurrentUserId } from "~/lib/session";
 import { db } from "~/db";
-import {
-  courses,
-  coupons,
-  lessons,
-  modules,
-  purchases,
-  refunds,
-  users,
-  RefundStatus,
-} from "~/db/schema";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { courses, refunds, users, RefundStatus } from "~/db/schema";
+import { eq } from "drizzle-orm";
 import { parseFormData, parseParams } from "~/lib/validation";
 import { formatPrice } from "~/lib/utils";
+import { REFUND_WINDOW_DAYS } from "~/lib/refund-eligibility";
 import {
-  REFUND_WINDOW_DAYS,
-  WATCH_LIMIT_SECONDS,
-  getRefundAmount,
-  isWithinRefundWindow,
-} from "~/lib/refund-eligibility";
-import {
-  getOpenRefundRequest,
-  getWatchedSeconds,
+  getRefundEligibility,
+  type RefundIneligibility,
 } from "~/lib/refund-eligibility.server";
 
 const refundParamsSchema = z.object({
@@ -43,25 +29,36 @@ function getCourseBySlug(slug: string) {
   return db.select().from(courses).where(eq(courses.slug, slug)).get();
 }
 
-function getLatestPurchase(userId: number, courseId: number) {
-  return db
-    .select()
-    .from(purchases)
-    .where(and(eq(purchases.userId, userId), eq(purchases.courseId, courseId)))
-    .orderBy(sql`${purchases.createdAt} desc`)
-    .get();
-}
-
-function getLessonIdsForCourse(courseId: number): number[] {
-  const rows = db
-    .select({ id: lessons.id })
-    .from(lessons)
-    .innerJoin(modules, eq(lessons.moduleId, modules.id))
-    .where(eq(modules.courseId, courseId))
-    .all();
-
-  return rows.map((row) => row.id);
-}
+const INELIGIBLE_RESPONSES: Record<
+  RefundIneligibility,
+  { message: string; status: number }
+> = {
+  "no-purchase": { message: "You have not bought this course.", status: 403 },
+  "open-request": {
+    message: "You already have an open Refund Request on this purchase.",
+    status: 409,
+  },
+  refunded: {
+    message: "This purchase has already been refunded.",
+    status: 409,
+  },
+  "claimed-seat": {
+    message: "A team purchase with a claimed seat cannot be refunded.",
+    status: 403,
+  },
+  "window-closed": {
+    message: `The ${REFUND_WINDOW_DAYS}-day Refund Window has closed.`,
+    status: 403,
+  },
+  "watch-limit": {
+    message: "You have watched too much of this course to request a refund.",
+    status: 403,
+  },
+  "completion-limit": {
+    message: "You have completed too much of this course to request a refund.",
+    status: 403,
+  },
+};
 
 /**
  * The confirmation the learner gets in their inbox. There is no mail
@@ -113,49 +110,14 @@ export async function action({ params, request }: Route.ActionArgs) {
     throw data("User not found", { status: 404 });
   }
 
-  const purchase = getLatestPurchase(currentUserId, course.id);
+  const eligibility = getRefundEligibility(currentUserId, course);
 
-  if (!purchase) {
-    throw data("You have not bought this course.", { status: 403 });
+  if (!eligibility.eligible) {
+    const { message, status } = INELIGIBLE_RESPONSES[eligibility.reason];
+    throw data(message, { status });
   }
 
-  if (getOpenRefundRequest(purchase.id)) {
-    throw data("You already have an open Refund Request on this purchase.", {
-      status: 409,
-    });
-  }
-
-  // A seat that came out of a team licence, and has been claimed, belongs to
-  // the team — the learner cannot hand it back on their own.
-  const claimedSeat = db
-    .select({ id: coupons.id })
-    .from(coupons)
-    .where(
-      and(eq(coupons.purchaseId, purchase.id), isNotNull(coupons.redeemedAt))
-    )
-    .get();
-
-  if (claimedSeat) {
-    throw data("A team purchase with a claimed seat cannot be refunded.", { status: 403 });
-  }
-
-  if (!isWithinRefundWindow(purchase.createdAt)) {
-    throw data(`The ${REFUND_WINDOW_DAYS}-day Refund Window has closed.`, {
-      status: 403,
-    });
-  }
-
-  const courseLessonIds = getLessonIdsForCourse(course.id);
-
-  const watchedSeconds = getWatchedSeconds(currentUserId, courseLessonIds);
-
-  if (watchedSeconds >= WATCH_LIMIT_SECONDS) {
-    throw data("You have watched too much of this course to request a refund.", {
-      status: 403,
-    });
-  }
-
-  const refundAmount = getRefundAmount(purchase, course);
+  const { purchase, refundAmount } = eligibility;
 
   const formData = await request.formData();
   const parsed = parseFormData(formData, refundActionSchema);
@@ -164,8 +126,7 @@ export async function action({ params, request }: Route.ActionArgs) {
     return data({ errors: parsed.errors }, { status: 400 });
   }
 
-  db
-    .insert(refunds)
+  db.insert(refunds)
     .values({
       purchaseId: purchase.id,
       status: RefundStatus.Open,
@@ -181,9 +142,7 @@ export async function action({ params, request }: Route.ActionArgs) {
     refundAmount,
   });
 
-  console.log(
-    `[email] to=${email.to} subject=${email.subject}\n${email.body}`
-  );
+  console.log(`[email] to=${email.to} subject=${email.subject}\n${email.body}`);
 
   return redirect("/settings");
 }

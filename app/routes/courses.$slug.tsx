@@ -14,11 +14,9 @@ import {
   enrollments,
   lessonProgress,
   courseRatings,
-  purchases,
-  coupons,
   LessonProgressStatus,
 } from "~/db/schema";
-import { eq, and, or, sql, inArray, isNotNull } from "drizzle-orm";
+import { eq, and, or, sql } from "drizzle-orm";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
@@ -48,15 +46,8 @@ import { renderMarkdown } from "~/lib/markdown.server";
 import { resolveCountry } from "~/lib/country.server";
 import { calculatePppPrice, getCountryTierInfo } from "~/lib/ppp";
 import {
-  COMPLETION_LIMIT,
-  WATCH_LIMIT_SECONDS,
-  getRefundAmount,
-  isWithinRefundWindow,
-  lastDayOfRefundWindow,
-} from "~/lib/refund-eligibility";
-import {
-  getOpenRefundRequest,
-  getWatchedSeconds,
+  getRefundEligibility,
+  type EligibleForRefund,
 } from "~/lib/refund-eligibility.server";
 import { parseFormData } from "~/lib/validation";
 import { MAX_RATING, MIN_RATING } from "~/lib/ratings";
@@ -371,77 +362,6 @@ function rateCourse(userId: number, courseId: number, rating: number) {
     .get();
 }
 
-function getPurchaseForCourse(userId: number, courseId: number) {
-  return db
-    .select()
-    .from(purchases)
-    .where(and(eq(purchases.userId, userId), eq(purchases.courseId, courseId)))
-    .orderBy(sql`${purchases.createdAt} desc`)
-    .get();
-}
-
-function getCompletedLessonCount(userId: number, lessonIds: number[]) {
-  if (lessonIds.length === 0) return 0;
-
-  const result = db
-    .select({ count: sql<number>`count(*)` })
-    .from(lessonProgress)
-    .where(
-      and(
-        eq(lessonProgress.userId, userId),
-        eq(lessonProgress.status, LessonProgressStatus.Completed),
-        inArray(lessonProgress.lessonId, lessonIds)
-      )
-    )
-    .get();
-
-  return result?.count ?? 0;
-}
-
-/**
- * The Refund Amount and Refund Window for the learner's latest Purchase, or
- * null if that Purchase does not have Refund Eligibility right now.
- */
-function getRefundEligibility(
-  userId: number,
-  course: { id: number; price: number }
-) {
-  const purchase = getPurchaseForCourse(userId, course.id);
-
-  if (!purchase) return null;
-  if (getOpenRefundRequest(purchase.id)) return null;
-
-  if (!isWithinRefundWindow(purchase.createdAt)) return null;
-
-  const lessonIds = getCourseLessonIds(course.id);
-
-  if (lessonIds.length > 0) {
-    const completedCount = getCompletedLessonCount(userId, lessonIds);
-    if (completedCount / lessonIds.length >= COMPLETION_LIMIT) {
-      return null;
-    }
-  }
-
-  if (getWatchedSeconds(userId, lessonIds) >= WATCH_LIMIT_SECONDS) {
-    return null;
-  }
-
-  const claimedSeat = db
-    .select({ id: coupons.id })
-    .from(coupons)
-    .where(
-      and(eq(coupons.purchaseId, purchase.id), isNotNull(coupons.redeemedAt))
-    )
-    .get();
-
-  if (claimedSeat) return null;
-
-  return {
-    refundAmount: getRefundAmount(purchase, course),
-    lastDayOfRefundWindow: lastDayOfRefundWindow(purchase.createdAt),
-  };
-}
-
 const ratingSchema = z.object({
   rating: z.coerce.number().int().min(MIN_RATING).max(MAX_RATING),
 });
@@ -474,16 +394,27 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let progress = 0;
   let lessonProgressMap: Record<number, string> = {};
   let nextLessonId: number | null = null;
-  let refundEligibility: ReturnType<typeof getRefundEligibility> = null;
+  let refundEligibility: Pick<
+    EligibleForRefund,
+    "refundAmount" | "lastDayOfRefundWindow"
+  > | null = null;
 
   if (currentUserId) {
     enrolled = isUserEnrolled(currentUserId, course.id);
 
     if (enrolled) {
-      refundEligibility = getRefundEligibility(currentUserId, {
+      // Refund Eligibility is judged per Purchase; the Enrollment check only
+      // decides whether the refund form is on the page at all.
+      const eligibility = getRefundEligibility(currentUserId, {
         id: course.id,
         price: courseWithDetails.price,
       });
+      if (eligibility.eligible) {
+        refundEligibility = {
+          refundAmount: eligibility.refundAmount,
+          lastDayOfRefundWindow: eligibility.lastDayOfRefundWindow,
+        };
+      }
 
       progress = calculateProgress(currentUserId, course.id, false);
 
