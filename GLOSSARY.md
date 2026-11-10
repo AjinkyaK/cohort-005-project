@@ -16,8 +16,8 @@ A Purchase of several Seats on a course for a team, made by its Team Admin. It d
 _Avoid_: Team purchase, bulk purchase
 
 **Seat**:
-One place on a course bought as part of a Team Licence, which anyone can claim once to become enrolled. Every Seat is in exactly one state: Available, Held, Claimed or Void.
-_Avoid_: Coupon, code (for the Seat itself), Unclaimed Seat (it lumps together Available, Held and Void)
+One place on a course bought as part of a Team Licence, which anyone can claim once to become enrolled. While its Team Licence is not refunded, every Seat is in exactly one state: Available, Held or Claimed. Once the Team Licence is refunded, its Seats can never be claimed.
+_Avoid_: Coupon, code (for the Seat itself), Unclaimed Seat (it lumps together Available Seats, Held Seats and Seats on a Refunded Team Licence)
 
 **Available Seat**:
 A Seat that can be claimed right now: nobody has claimed it, and its Team Licence has neither an Open nor an Approved Refund Request.
@@ -107,12 +107,8 @@ A Seat that someone has claimed, whoever they are, the Team Admin included. A Te
 _Avoid_: Redeemed coupon, used seat
 
 **Held Seat**:
-A Seat that would be Available, except that its Team Licence has an Open Refund Request, so it cannot be claimed until the request is resolved. If the request is Declined it becomes Available again; if Approved, it becomes Void. Because Seats are held, a Team Licence never gains a Claimed Seat while its Refund Request is Open.
+A Seat that would be Available, except that its Team Licence has an Open Refund Request, so it cannot be claimed until the request is resolved. If the request is Declined it becomes Available again; if Approved, it can never be claimed. Because Seats are held, a Team Licence never gains a Claimed Seat while its Refund Request is Open.
 _Avoid_: Frozen seat, locked seat
 
-**Void Seat**:
-A Seat on a Refunded Team Licence. It was never claimed and never can be.
-_Avoid_: Cancelled seat, revoked seat, expired seat
-
 **Refunded Purchase**:
-A Purchase with an Approved Refund Request. The buyer's Enrollment in the course ends, unless they also hold a Claimed Seat on it; every Seat on a Team Licence becomes Void. Buying the course again creates a new Purchase with its own Refund Window.
+A Purchase with an Approved Refund Request. The buyer's Enrollment in the course ends, unless they also hold a Claimed Seat on it; no Seat on a Team Licence can be claimed any more. Buying the course again creates a new Purchase with its own Refund Window.
