@@ -19,7 +19,7 @@ A learner's request, with a written reason, for the money from one of their own 
 _Avoid_: Cancellation, Reversal, Chargeback, Refund (for the request itself)
 
 **Refund**:
-Money being given back to the learner, once an Admin approves a Refund Request. A learner counts as refunded from the moment of approval; when the money actually reaches their bank is outside the platform and is not tracked.
+Money being given back to the learner, once an Admin approves a Refund Request. A learner counts as refunded from the moment of approval, whatever its Payment Transfer Status; when the money actually reaches their bank is outside the platform and is not tracked.
 _Avoid_: Reversal, Chargeback, Delivered, Settled, Paid out
 
 **Refund Amount**:
@@ -35,13 +35,34 @@ A Refund Request that no Admin has resolved yet. A Purchase can have at most one
 _Avoid_: Requested, Pending
 
 **Approved** (Refund Request status):
-An Admin has accepted the Refund Request, so a Refund is due. Approved is final within the platform, even if the money later fails to reach the learner.
+An Admin has accepted the Refund Request, so a Refund is due. Approved is final within the platform, even if the Refund's Payment Transfer Status later becomes Failed or Canceled.
 
 **Declined** (Refund Request status):
 An Admin has turned the Refund Request down, so nothing is given back. A Declined request does not stop the learner raising a new one while they are still eligible.
 
 **Admin**:
 The only kind of user who can resolve an Open Refund Request, by approving or declining it.
+
+## Payment transfers
+
+**Payment Transfer Status**:
+The payment service's latest word on a Refund: how the money's journey back to the learner is going. It is shown to the learner alongside the Refund Request's status but decides nothing else; being refunded still depends only on approval. Only an Approved Refund Request can have one, and until the payment service reports anything it has none. Each new report replaces the last, and earlier reports are not kept.
+_Avoid_: Refund status, Payout status, Settlement status
+
+**Pending** (Payment Transfer Status):
+The payment service has taken on the Refund but has not finished sending it. Not to be confused with an Open Refund Request, which has no Payment Transfer Status at all.
+
+**Succeeded** (Payment Transfer Status):
+The payment service reports the money as sent. It does not mean the money has reached the learner's bank, and a Succeeded Refund can still later become Failed.
+
+**Failed** (Payment Transfer Status):
+The payment service could not send the money, for example because the learner's card is closed. The Refund Request stays Approved and the money is still owed.
+
+**Canceled** (Payment Transfer Status):
+The payment service's transfer was withdrawn before it completed. It is the transfer that is canceled, not the Refund Request, which stays Approved.
+
+**Requires Action** (Payment Transfer Status):
+The payment service needs something more before it can send the money, such as the learner's bank details.
 
 ## Refund Eligibility
 
