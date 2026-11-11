@@ -1,8 +1,13 @@
-import { data, isRouteErrorResponse, Link } from "react-router";
+import { data, isRouteErrorResponse, Link, useFetcher } from "react-router";
+import { z } from "zod";
 import { AlertTriangle, ReceiptText } from "lucide-react";
 import type { Route } from "./+types/admin.refunds";
 import { requirePlatformAdmin } from "~/lib/access.server";
-import { getOpenRefundRequests } from "~/lib/refund-requests.server";
+import {
+  declineRefundRequest,
+  getOpenRefundRequests,
+} from "~/lib/refund-requests.server";
+import { parseFormData } from "~/lib/validation";
 import { formatDuration, formatPrice } from "~/lib/utils";
 import { Card, CardContent } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
@@ -20,10 +25,30 @@ export async function loader({ request }: Route.LoaderArgs) {
   return { requests: getOpenRefundRequests() };
 }
 
+const refundActionSchema = z.object({
+  intent: z.literal("decline"),
+  refundId: z.coerce.number().int(),
+});
+
 export async function action({ request }: Route.ActionArgs) {
-  await requirePlatformAdmin(request);
-  // Approving and declining arrive in #10 and #11.
-  throw data("Invalid action.", { status: 400 });
+  const { userId } = await requirePlatformAdmin(request);
+
+  const parsed = parseFormData(await request.formData(), refundActionSchema);
+  if (!parsed.success) {
+    // Approving arrives in #11.
+    throw data("Invalid action.", { status: 400 });
+  }
+
+  const result = declineRefundRequest(parsed.data.refundId, userId);
+  if (!result.ok && result.reason === "not-found") {
+    throw data("Refund Request not found.", { status: 404 });
+  }
+  if (!result.ok) {
+    throw data("This Refund Request has already been resolved.", {
+      status: 409,
+    });
+  }
+  return { success: true };
 }
 
 type OpenRefundRequest = Route.ComponentProps["loaderData"]["requests"][number];
@@ -54,6 +79,33 @@ function PurchaseKindBadge({ kind }: { kind: OpenRefundRequest["purchaseKind"] }
 
 const headerCell =
   "px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground";
+
+function DeclineButton({ refundId }: { refundId: number }) {
+  // On success the request leaves the Open list, taking this row with it.
+  const fetcher = useFetcher<typeof action>();
+  const busy = fetcher.state !== "idle";
+
+  return (
+    <fetcher.Form
+      method="post"
+      onSubmit={(event) => {
+        if (
+          !confirm(
+            "Decline this Refund Request? Nothing will be given back and the learner keeps their access."
+          )
+        ) {
+          event.preventDefault();
+        }
+      }}
+    >
+      <input type="hidden" name="intent" value="decline" />
+      <input type="hidden" name="refundId" value={refundId} />
+      <Button type="submit" variant="outline" size="sm" disabled={busy}>
+        {busy ? "Declining..." : "Decline"}
+      </Button>
+    </fetcher.Form>
+  );
+}
 
 function RefundRequestRow({ request }: { request: OpenRefundRequest }) {
   const { progress } = request;
@@ -104,6 +156,9 @@ function RefundRequestRow({ request }: { request: OpenRefundRequest }) {
         <div className="mt-1 text-muted-foreground">
           Raised {formatDate(request.requestedAt)}
         </div>
+      </td>
+      <td className="px-4 py-3">
+        <DeclineButton refundId={request.id} />
       </td>
     </tr>
   );
@@ -168,6 +223,9 @@ export default function AdminRefunds({ loaderData }: Route.ComponentProps) {
                     <th className={headerCell}>Purchase</th>
                     <th className={headerCell}>Progress</th>
                     <th className={headerCell}>Reason</th>
+                    <th className={headerCell}>
+                      <span className="sr-only">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>

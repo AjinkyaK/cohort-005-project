@@ -1,6 +1,6 @@
-// The Platform Admin's view of Refund Requests. See GLOSSARY.md.
+// Refund Requests: the Platform Admin resolving them, and the learner seeing their own. See GLOSSARY.md.
 
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "~/db";
 import {
   RefundStatus,
@@ -86,4 +86,61 @@ function getProgress(userId: number, courseId: number): RefundRequestProgress {
     completedLessons: getCompletedLessonCount(userId, lessonIds),
     totalLessons: lessonIds.length,
   };
+}
+
+export type DeclineResult =
+  | { ok: true; refundRequest: typeof refunds.$inferSelect }
+  | { ok: false; reason: "not-found" | "already-resolved" };
+
+/**
+ * Decline an Open Refund Request: nothing is given back and the learner keeps
+ * their Enrollment (ADR 0003).
+ */
+export function declineRefundRequest(
+  refundId: number,
+  platformAdminId: number,
+  now: Date = new Date()
+): DeclineResult {
+  // Only an Open request can be resolved. The status check sits in the update
+  // itself, so two Platform Admins resolving at once cannot both succeed.
+  const refundRequest = db
+    .update(refunds)
+    .set({
+      status: RefundStatus.Declined,
+      resolvedAt: now.toISOString(),
+      resolvedByUserId: platformAdminId,
+    })
+    .where(and(eq(refunds.id, refundId), eq(refunds.status, RefundStatus.Open)))
+    .returning()
+    .get();
+
+  if (refundRequest) return { ok: true, refundRequest };
+
+  const exists = db
+    .select({ id: refunds.id })
+    .from(refunds)
+    .where(eq(refunds.id, refundId))
+    .get();
+  return { ok: false, reason: exists ? "already-resolved" : "not-found" };
+}
+
+/** The learner's own Refund Requests, whatever their status, newest first. */
+export function getRefundRequestsForLearner(userId: number) {
+  return db
+    .select({
+      id: refunds.id,
+      status: refunds.status,
+      reason: refunds.reason,
+      requestedAt: refunds.requestedAt,
+      resolvedAt: refunds.resolvedAt,
+      courseTitle: courses.title,
+      courseSlug: courses.slug,
+      amountPaid: purchases.amountPaid,
+    })
+    .from(refunds)
+    .innerJoin(purchases, eq(refunds.purchaseId, purchases.id))
+    .innerJoin(courses, eq(purchases.courseId, courses.id))
+    .where(eq(purchases.userId, userId))
+    .orderBy(desc(refunds.requestedAt), desc(refunds.id))
+    .all();
 }

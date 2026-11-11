@@ -3,6 +3,7 @@ import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
 import { eq } from "drizzle-orm";
 import { claimSeat, getSeatByCode, getSeatState } from "./seats.server";
+import { declineRefundRequest } from "./refund-requests.server";
 
 const holder = vi.hoisted(() => ({
   db: undefined as unknown as ReturnType<typeof createTestDb>,
@@ -48,10 +49,11 @@ function buyTeamLicence() {
 }
 
 function requestRefund(purchaseId: number, status: schema.RefundStatus) {
-  holder.db
+  return holder.db
     .insert(schema.refunds)
     .values({ purchaseId, reason: "The team changed plans.", status })
-    .run();
+    .returning()
+    .get();
 }
 
 function addLearner(name: string) {
@@ -92,6 +94,25 @@ describe("getSeatState", () => {
   it("is Available again once the Refund Request is Declined", () => {
     const { purchase, seat } = buyTeamLicence();
     requestRefund(purchase.id, schema.RefundStatus.Declined);
+
+    expect(getSeatState(seat)).toBe("available");
+  });
+
+  it("goes from Held back to Available when a Platform Admin declines the Refund Request", () => {
+    const { purchase, seat } = buyTeamLicence();
+    const refundRequest = requestRefund(purchase.id, schema.RefundStatus.Open);
+    const admin = holder.db
+      .insert(schema.users)
+      .values({
+        name: "Pat Admin",
+        email: "pat@example.com",
+        role: schema.UserRole.Admin,
+      })
+      .returning()
+      .get();
+    expect(getSeatState(seat)).toBe("held");
+
+    declineRefundRequest(refundRequest.id, admin.id);
 
     expect(getSeatState(seat)).toBe("available");
   });

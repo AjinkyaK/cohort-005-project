@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
-import { getOpenRefundRequests } from "./refund-requests.server";
+import {
+  declineRefundRequest,
+  getOpenRefundRequests,
+  getRefundRequestsForLearner,
+} from "./refund-requests.server";
 
 const holder = vi.hoisted(() => ({
   db: undefined as unknown as ReturnType<typeof createTestDb>,
@@ -281,5 +285,130 @@ describe("getOpenRefundRequests", () => {
 
       expect(getOpenRefundRequests()[0].progress).toBeNull();
     });
+  });
+});
+
+describe("declineRefundRequest", () => {
+  function addPlatformAdmin() {
+    return holder.db
+      .insert(schema.users)
+      .values({
+        name: "Pat Admin",
+        email: "pat@example.com",
+        role: schema.UserRole.Admin,
+      })
+      .returning()
+      .get();
+  }
+
+  it("declines an Open request, recording when and by whom, and refunds nothing", () => {
+    const admin = addPlatformAdmin();
+    const request = requestRefund(buy(base.user.id).id);
+    const now = new Date("2026-03-04T10:00:00.000Z");
+
+    const result = declineRefundRequest(request.id, admin.id, now);
+
+    expect(result).toMatchObject({
+      ok: true,
+      refundRequest: {
+        id: request.id,
+        status: schema.RefundStatus.Declined,
+        resolvedAt: "2026-03-04T10:00:00.000Z",
+        resolvedByUserId: admin.id,
+        amountRefunded: null,
+        paymentTransferStatus: null,
+      },
+    });
+  });
+
+  it.each([schema.RefundStatus.Approved, schema.RefundStatus.Declined])(
+    "refuses to decline a request that is already %s, and changes nothing",
+    (status) => {
+      const admin = addPlatformAdmin();
+      const request = requestRefund(buy(base.user.id).id, {
+        status,
+        resolvedAt: "2026-03-03T12:00:00.000Z",
+        resolvedByUserId: base.instructor.id,
+      });
+
+      const result = declineRefundRequest(request.id, admin.id);
+
+      expect(result).toEqual({ ok: false, reason: "already-resolved" });
+      const after = holder.db
+        .select()
+        .from(schema.refunds)
+        .where(eq(schema.refunds.id, request.id))
+        .get();
+      expect(after).toEqual(request);
+    }
+  );
+
+  it("refuses a Refund Request that does not exist", () => {
+    const admin = addPlatformAdmin();
+
+    expect(declineRefundRequest(999, admin.id)).toEqual({
+      ok: false,
+      reason: "not-found",
+    });
+  });
+
+  it("leaves the learner's Enrollment in place", () => {
+    const admin = addPlatformAdmin();
+    holder.db
+      .insert(schema.enrollments)
+      .values({ userId: base.user.id, courseId: base.course.id })
+      .run();
+    const request = requestRefund(buy(base.user.id).id);
+
+    declineRefundRequest(request.id, admin.id);
+
+    const enrollment = holder.db
+      .select()
+      .from(schema.enrollments)
+      .where(eq(schema.enrollments.userId, base.user.id))
+      .get();
+    expect(enrollment).toMatchObject({ courseId: base.course.id });
+  });
+
+  it("takes the request off the Open list", () => {
+    const admin = addPlatformAdmin();
+    const declined = requestRefund(buy(base.user.id).id);
+    const stillOpen = requestRefund(buy(addLearner("Bea").id).id);
+
+    declineRefundRequest(declined.id, admin.id);
+
+    expect(getOpenRefundRequests().map((r) => r.id)).toEqual([stillOpen.id]);
+  });
+});
+
+describe("getRefundRequestsForLearner", () => {
+  it("lists the learner's requests with their status, newest first, and nobody else's", () => {
+    const declined = requestRefund(buy(base.user.id).id, {
+      status: schema.RefundStatus.Declined,
+      requestedAt: "2026-03-02T09:00:00.000Z",
+      resolvedAt: "2026-03-04T10:00:00.000Z",
+    });
+    const open = requestRefund(buy(base.user.id).id, {
+      requestedAt: "2026-03-06T09:00:00.000Z",
+    });
+    requestRefund(buy(addLearner("Bea").id).id);
+
+    const requests = getRefundRequestsForLearner(base.user.id);
+
+    expect(requests).toEqual([
+      expect.objectContaining({
+        id: open.id,
+        status: schema.RefundStatus.Open,
+        resolvedAt: null,
+        courseTitle: "Test Course",
+        courseSlug: "test-course",
+        amountPaid: 4900,
+      }),
+      expect.objectContaining({
+        id: declined.id,
+        status: schema.RefundStatus.Declined,
+        resolvedAt: "2026-03-04T10:00:00.000Z",
+      }),
+    ]);
   });
 });
