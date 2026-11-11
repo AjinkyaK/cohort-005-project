@@ -3,10 +3,16 @@ import { eq } from "drizzle-orm";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
 import {
+  approveRefundRequest,
   declineRefundRequest,
   getOpenRefundRequests,
   getRefundRequestsForLearner,
 } from "./refund-requests.server";
+import {
+  getCompletedLessonCount,
+  getRefundEligibility,
+  getWatchedSeconds,
+} from "./refund-eligibility.server";
 
 const holder = vi.hoisted(() => ({
   db: undefined as unknown as ReturnType<typeof createTestDb>,
@@ -105,6 +111,18 @@ function complete(userId: number, lessonId: number) {
       status: schema.LessonProgressStatus.Completed,
     })
     .run();
+}
+
+function addPlatformAdmin() {
+  return holder.db
+    .insert(schema.users)
+    .values({
+      name: "Pat Admin",
+      email: "pat@example.com",
+      role: schema.UserRole.Admin,
+    })
+    .returning()
+    .get();
 }
 
 describe("getOpenRefundRequests", () => {
@@ -289,18 +307,6 @@ describe("getOpenRefundRequests", () => {
 });
 
 describe("declineRefundRequest", () => {
-  function addPlatformAdmin() {
-    return holder.db
-      .insert(schema.users)
-      .values({
-        name: "Pat Admin",
-        email: "pat@example.com",
-        role: schema.UserRole.Admin,
-      })
-      .returning()
-      .get();
-  }
-
   it("declines an Open request, recording when and by whom, and refunds nothing", () => {
     const admin = addPlatformAdmin();
     const request = requestRefund(buy(base.user.id).id);
@@ -378,6 +384,216 @@ describe("declineRefundRequest", () => {
     declineRefundRequest(declined.id, admin.id);
 
     expect(getOpenRefundRequests().map((r) => r.id)).toEqual([stillOpen.id]);
+  });
+});
+
+describe("approveRefundRequest", () => {
+  it("approves an Open request, recording the Amount Refunded, when and by whom", () => {
+    const admin = addPlatformAdmin();
+    const request = requestRefund(buy(base.user.id).id);
+    const now = new Date("2026-03-04T10:00:00.000Z");
+
+    const result = approveRefundRequest(request.id, admin.id, 4500, now);
+
+    expect(result).toMatchObject({
+      ok: true,
+      refundRequest: {
+        id: request.id,
+        status: schema.RefundStatus.Approved,
+        amountRefunded: 4500,
+        resolvedAt: "2026-03-04T10:00:00.000Z",
+        resolvedByUserId: admin.id,
+        paymentTransferStatus: null,
+      },
+    });
+  });
+
+  it.each([schema.RefundStatus.Approved, schema.RefundStatus.Declined])(
+    "refuses to approve a request that is already %s, and changes nothing",
+    (status) => {
+      const admin = addPlatformAdmin();
+      const request = requestRefund(buy(base.user.id).id, {
+        status,
+        resolvedAt: "2026-03-03T12:00:00.000Z",
+        resolvedByUserId: base.instructor.id,
+      });
+
+      const result = approveRefundRequest(request.id, admin.id, 4900);
+
+      expect(result).toEqual({ ok: false, reason: "already-resolved" });
+      const after = holder.db
+        .select()
+        .from(schema.refunds)
+        .where(eq(schema.refunds.id, request.id))
+        .get();
+      expect(after).toEqual(request);
+    }
+  );
+
+  it("refuses a Refund Request that does not exist", () => {
+    const admin = addPlatformAdmin();
+
+    expect(approveRefundRequest(999, admin.id, 4900)).toEqual({
+      ok: false,
+      reason: "not-found",
+    });
+  });
+
+  it("refuses a request on a Team Licence, and leaves it Open", () => {
+    const admin = addPlatformAdmin();
+    const purchase = buy(base.user.id);
+    const team = holder.db.insert(schema.teams).values({}).returning().get();
+    holder.db
+      .insert(schema.coupons)
+      .values({
+        teamId: team.id,
+        courseId: base.course.id,
+        code: "SEAT-1",
+        purchaseId: purchase.id,
+      })
+      .run();
+    const request = requestRefund(purchase.id);
+
+    const result = approveRefundRequest(request.id, admin.id, 4900);
+
+    expect(result).toEqual({ ok: false, reason: "team-licence" });
+    expect(getOpenRefundRequests().map((r) => r.id)).toEqual([request.id]);
+  });
+
+  it("reports an already-resolved Team Licence request as already resolved", () => {
+    const admin = addPlatformAdmin();
+    const purchase = buy(base.user.id);
+    const team = holder.db.insert(schema.teams).values({}).returning().get();
+    holder.db
+      .insert(schema.coupons)
+      .values({
+        teamId: team.id,
+        courseId: base.course.id,
+        code: "SEAT-1",
+        purchaseId: purchase.id,
+      })
+      .run();
+    const request = requestRefund(purchase.id, {
+      status: schema.RefundStatus.Declined,
+    });
+
+    expect(approveRefundRequest(request.id, admin.id, 4900)).toEqual({
+      ok: false,
+      reason: "already-resolved",
+    });
+  });
+
+  describe("the learner's Enrollment", () => {
+    function enroll(userId: number, courseId = base.course.id) {
+      holder.db.insert(schema.enrollments).values({ userId, courseId }).run();
+    }
+
+    function enrolledCourseIds(userId: number) {
+      return holder.db
+        .select()
+        .from(schema.enrollments)
+        .where(eq(schema.enrollments.userId, userId))
+        .all()
+        .map((e) => e.courseId);
+    }
+
+    it("ends the learner's Enrollment in the course, and nobody else's", () => {
+      const admin = addPlatformAdmin();
+      const bea = addLearner("Bea");
+      const otherCourse = holder.db
+        .insert(schema.courses)
+        .values({
+          title: "Other Course",
+          slug: "other-course",
+          description: "Another course",
+          salesCopy: "Sales copy.",
+          instructorId: base.instructor.id,
+          categoryId: base.category.id,
+          status: schema.CourseStatus.Published,
+        })
+        .returning()
+        .get();
+      enroll(base.user.id);
+      enroll(base.user.id, otherCourse.id);
+      enroll(bea.id);
+      const request = requestRefund(buy(base.user.id).id);
+
+      approveRefundRequest(request.id, admin.id, 4900);
+
+      expect(enrolledCourseIds(base.user.id)).toEqual([otherCourse.id]);
+      expect(enrolledCourseIds(bea.id)).toEqual([base.course.id]);
+    });
+
+    it("leaves the Enrollment alone if the learner also holds a Claimed Seat on the course", () => {
+      const admin = addPlatformAdmin();
+      const teamAdmin = addLearner("Tess");
+      const team = holder.db.insert(schema.teams).values({}).returning().get();
+      holder.db
+        .insert(schema.coupons)
+        .values({
+          teamId: team.id,
+          courseId: base.course.id,
+          code: "SEAT-1",
+          purchaseId: buy(teamAdmin.id).id,
+          redeemedByUserId: base.user.id,
+          redeemedAt: "2026-03-02T12:00:00.000Z",
+        })
+        .run();
+      enroll(base.user.id);
+      const request = requestRefund(buy(base.user.id).id);
+
+      const result = approveRefundRequest(request.id, admin.id, 4900);
+
+      expect(result.ok).toBe(true);
+      expect(enrolledCourseIds(base.user.id)).toEqual([base.course.id]);
+    });
+  });
+
+  it("makes the Purchase a Refunded Purchase, and lets the learner buy the course again", () => {
+    const admin = addPlatformAdmin();
+    const course = { id: base.course.id, price: base.course.price };
+    const request = requestRefund(buy(base.user.id).id);
+
+    approveRefundRequest(request.id, admin.id, 4900);
+
+    expect(
+      getRefundEligibility(base.user.id, course, new Date("2026-03-05T12:00:00.000Z"))
+    ).toEqual({ eligible: false, reason: "refunded" });
+
+    const again = buy(base.user.id, { createdAt: "2026-03-10T12:00:00.000Z" });
+
+    expect(
+      getRefundEligibility(base.user.id, course, new Date("2026-03-11T12:00:00.000Z"))
+    ).toMatchObject({ eligible: true, purchase: { id: again.id } });
+  });
+
+  it("keeps the learner's lesson progress, Watched Time and quiz attempts", () => {
+    const admin = addPlatformAdmin();
+    const lessonIds = addLessons(base.course.id, 2);
+    watch(base.user.id, lessonIds[0], 600);
+    complete(base.user.id, lessonIds[0]);
+    const quiz = holder.db
+      .insert(schema.quizzes)
+      .values({ lessonId: lessonIds[0], title: "Quiz", passingScore: 0.7 })
+      .returning()
+      .get();
+    holder.db
+      .insert(schema.quizAttempts)
+      .values({ userId: base.user.id, quizId: quiz.id, score: 0.8, passed: true })
+      .run();
+    const request = requestRefund(buy(base.user.id).id);
+
+    approveRefundRequest(request.id, admin.id, 4900);
+
+    expect(getWatchedSeconds(base.user.id, lessonIds)).toBe(600);
+    expect(getCompletedLessonCount(base.user.id, lessonIds)).toBe(1);
+    expect(
+      holder.db
+        .select()
+        .from(schema.quizAttempts)
+        .where(eq(schema.quizAttempts.userId, base.user.id))
+        .all()
+    ).toHaveLength(1);
   });
 });
 

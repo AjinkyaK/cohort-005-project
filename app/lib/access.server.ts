@@ -1,5 +1,5 @@
 import { data } from "react-router";
-import { eq, and } from "drizzle-orm";
+import { and, desc, eq, notExists } from "drizzle-orm";
 import { db } from "~/db";
 import {
   UserRole,
@@ -7,6 +7,8 @@ import {
   courses,
   enrollments,
   purchases,
+  refunds,
+  RefundStatus,
 } from "~/db/schema";
 import { getCurrentUserId } from "~/lib/session";
 import { resolveCountry } from "~/lib/country.server";
@@ -34,11 +36,32 @@ function isUserEnrolled(userId: number, courseId: number) {
   return !!findEnrollment(userId, courseId);
 }
 
+/**
+ * The learner's Purchase of the course that isn't a Refunded Purchase. After a
+ * refund and a re-buy they hold more than one (ADR 0003).
+ */
 function findPurchase(userId: number, courseId: number) {
   return db
     .select()
     .from(purchases)
-    .where(and(eq(purchases.userId, userId), eq(purchases.courseId, courseId)))
+    .where(
+      and(
+        eq(purchases.userId, userId),
+        eq(purchases.courseId, courseId),
+        notExists(
+          db
+            .select({ id: refunds.id })
+            .from(refunds)
+            .where(
+              and(
+                eq(refunds.purchaseId, purchases.id),
+                eq(refunds.status, RefundStatus.Approved)
+              )
+            )
+        )
+      )
+    )
+    .orderBy(desc(purchases.createdAt))
     .get();
 }
 

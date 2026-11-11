@@ -6,6 +6,7 @@ import {
   RefundStatus,
   coupons,
   courses,
+  enrollments,
   purchases,
   refunds,
   users,
@@ -16,6 +17,7 @@ import {
   getLessonIdsForCourse,
   getWatchedSeconds,
 } from "./refund-eligibility.server";
+import { holdsClaimedSeat, isTeamLicence } from "./seats.server";
 
 export type PurchaseKind = "individual" | "team-licence";
 
@@ -115,13 +117,88 @@ export function declineRefundRequest(
     .get();
 
   if (refundRequest) return { ok: true, refundRequest };
+  return { ok: false, reason: whyNotOpen(refundId) };
+}
 
+/** Why a Refund Request could not be resolved: it is gone, or no longer Open. */
+function whyNotOpen(refundId: number) {
   const exists = db
     .select({ id: refunds.id })
     .from(refunds)
     .where(eq(refunds.id, refundId))
     .get();
-  return { ok: false, reason: exists ? "already-resolved" : "not-found" };
+  return exists ? ("already-resolved" as const) : ("not-found" as const);
+}
+
+export type ApproveResult =
+  | { ok: true; refundRequest: typeof refunds.$inferSelect }
+  | { ok: false; reason: "not-found" | "already-resolved" | "team-licence" };
+
+/**
+ * Approve an Open Refund Request on an Individual Purchase: a Refund is due,
+ * for the Amount Refunded the Platform Admin entered, and the learner's
+ * Enrollment ends (ADR 0003). Approved is final.
+ */
+export function approveRefundRequest(
+  refundId: number,
+  platformAdminId: number,
+  amountRefunded: number,
+  now: Date = new Date()
+): ApproveResult {
+  // The approval and the Enrollment ending happen together or not at all.
+  return db.transaction((tx) => {
+    const purchase = tx
+      .select({
+        status: refunds.status,
+        id: purchases.id,
+        userId: purchases.userId,
+        courseId: purchases.courseId,
+      })
+      .from(refunds)
+      .innerJoin(purchases, eq(refunds.purchaseId, purchases.id))
+      .where(eq(refunds.id, refundId))
+      .get();
+
+    if (!purchase) return { ok: false, reason: "not-found" };
+    if (purchase.status !== RefundStatus.Open) {
+      return { ok: false, reason: "already-resolved" };
+    }
+    // Approving a Team Licence also voids its Seats, which arrives in #13.
+    if (isTeamLicence(purchase.id)) return { ok: false, reason: "team-licence" };
+
+    // Only the payment service sets a Payment Transfer Status, so it stays null.
+    const refundRequest = tx
+      .update(refunds)
+      .set({
+        status: RefundStatus.Approved,
+        amountRefunded,
+        resolvedAt: now.toISOString(),
+        resolvedByUserId: platformAdminId,
+      })
+      .where(
+        and(eq(refunds.id, refundId), eq(refunds.status, RefundStatus.Open))
+      )
+      .returning()
+      .get();
+
+    if (!refundRequest) return { ok: false, reason: "already-resolved" };
+
+    // An Enrollment doesn't record its Purchase, so it is found by learner and
+    // course alone, and left alone if their team paid for a place too
+    // (ADR 0004). Progress is kept (ADR 0001).
+    if (!holdsClaimedSeat(purchase.userId, purchase.courseId)) {
+      tx.delete(enrollments)
+        .where(
+          and(
+            eq(enrollments.userId, purchase.userId),
+            eq(enrollments.courseId, purchase.courseId)
+          )
+        )
+        .run();
+    }
+
+    return { ok: true, refundRequest };
+  });
 }
 
 /** The learner's own Refund Requests, whatever their status, newest first. */

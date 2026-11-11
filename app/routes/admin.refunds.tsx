@@ -4,6 +4,7 @@ import { AlertTriangle, ReceiptText } from "lucide-react";
 import type { Route } from "./+types/admin.refunds";
 import { requirePlatformAdmin } from "~/lib/access.server";
 import {
+  approveRefundRequest,
   declineRefundRequest,
   getOpenRefundRequests,
 } from "~/lib/refund-requests.server";
@@ -11,6 +12,7 @@ import { parseFormData } from "~/lib/validation";
 import { formatDuration, formatPrice } from "~/lib/utils";
 import { Card, CardContent } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
+import { Input } from "~/components/ui/input";
 import { Skeleton } from "~/components/ui/skeleton";
 
 export function meta() {
@@ -25,30 +27,56 @@ export async function loader({ request }: Route.LoaderArgs) {
   return { requests: getOpenRefundRequests() };
 }
 
-const refundActionSchema = z.object({
-  intent: z.literal("decline"),
-  refundId: z.coerce.number().int(),
-});
+const refundActionSchema = z.discriminatedUnion("intent", [
+  z.object({
+    intent: z.literal("decline"),
+    refundId: z.coerce.number().int(),
+  }),
+  z.object({
+    intent: z.literal("approve"),
+    refundId: z.coerce.number().int(),
+    // Entered in dollars, like other prices; stored in cents.
+    amountRefunded: z.coerce
+      .number({ message: "Enter the Amount Refunded." })
+      .min(0, "The Amount Refunded can't be negative."),
+  }),
+]);
 
 export async function action({ request }: Route.ActionArgs) {
   const { userId } = await requirePlatformAdmin(request);
 
-  const parsed = parseFormData(await request.formData(), refundActionSchema);
+  const formData = await request.formData();
+  // An empty box would coerce to 0, so treat it as missing.
+  if (formData.get("amountRefunded") === "") formData.delete("amountRefunded");
+
+  const parsed = parseFormData(formData, refundActionSchema);
   if (!parsed.success) {
-    // Approving arrives in #11.
-    throw data("Invalid action.", { status: 400 });
+    return data({ errors: parsed.errors }, { status: 400 });
   }
 
-  const result = declineRefundRequest(parsed.data.refundId, userId);
-  if (!result.ok && result.reason === "not-found") {
-    throw data("Refund Request not found.", { status: 404 });
+  const result =
+    parsed.data.intent === "approve"
+      ? approveRefundRequest(
+          parsed.data.refundId,
+          userId,
+          Math.round(parsed.data.amountRefunded * 100)
+        )
+      : declineRefundRequest(parsed.data.refundId, userId);
+
+  if (result.ok) return { success: true };
+
+  switch (result.reason) {
+    case "not-found":
+      throw data("Refund Request not found.", { status: 404 });
+    case "already-resolved":
+      throw data("This Refund Request has already been resolved.", {
+        status: 409,
+      });
+    case "team-licence":
+      throw data("Approving a Team Licence Refund Request isn't supported yet.", {
+        status: 409,
+      });
   }
-  if (!result.ok) {
-    throw data("This Refund Request has already been resolved.", {
-      status: 409,
-    });
-  }
-  return { success: true };
 }
 
 type OpenRefundRequest = Route.ComponentProps["loaderData"]["requests"][number];
@@ -107,6 +135,56 @@ function DeclineButton({ refundId }: { refundId: number }) {
   );
 }
 
+function ApproveForm({ request }: { request: OpenRefundRequest }) {
+  // On success the request leaves the Open list, taking this row with it.
+  const fetcher = useFetcher<typeof action>();
+  const busy = fetcher.state !== "idle";
+  const error =
+    fetcher.data && "errors" in fetcher.data
+      ? fetcher.data.errors.amountRefunded
+      : undefined;
+  const inputId = `amount-refunded-${request.id}`;
+
+  return (
+    <fetcher.Form
+      method="post"
+      className="space-y-1"
+      onSubmit={(event) => {
+        if (
+          !confirm(
+            "Approve this Refund Request? The learner loses access to the course, and this can't be undone."
+          )
+        ) {
+          event.preventDefault();
+        }
+      }}
+    >
+      <input type="hidden" name="intent" value="approve" />
+      <input type="hidden" name="refundId" value={request.id} />
+      <label htmlFor={inputId} className="block text-xs text-muted-foreground">
+        Amount Refunded ($)
+      </label>
+      <div className="flex gap-2">
+        <Input
+          id={inputId}
+          name="amountRefunded"
+          type="number"
+          min="0"
+          step="0.01"
+          required
+          defaultValue={(request.refundAmount / 100).toFixed(2)}
+          aria-invalid={error ? true : undefined}
+          className="h-8 w-28"
+        />
+        <Button type="submit" size="sm" disabled={busy}>
+          {busy ? "Approving..." : "Approve"}
+        </Button>
+      </div>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </fetcher.Form>
+  );
+}
+
 function RefundRequestRow({ request }: { request: OpenRefundRequest }) {
   const { progress } = request;
 
@@ -157,7 +235,14 @@ function RefundRequestRow({ request }: { request: OpenRefundRequest }) {
           Raised {formatDate(request.requestedAt)}
         </div>
       </td>
-      <td className="px-4 py-3">
+      <td className="space-y-2 px-4 py-3">
+        {request.purchaseKind === "individual" ? (
+          <ApproveForm request={request} />
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Team Licence approval coming soon
+          </p>
+        )}
         <DeclineButton refundId={request.id} />
       </td>
     </tr>

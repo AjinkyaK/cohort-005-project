@@ -22,6 +22,28 @@ export function getSeatState(seat: Seat): SeatState {
   return "available";
 }
 
+/** Whether the Purchase is a Team Licence: one that bought Seats. */
+export function isTeamLicence(purchaseId: number) {
+  const seat = db
+    .select({ id: coupons.id })
+    .from(coupons)
+    .where(eq(coupons.purchaseId, purchaseId))
+    .get();
+  return seat !== undefined;
+}
+
+/** Whether the learner holds a Claimed Seat on the course, from any Team Licence. */
+export function holdsClaimedSeat(userId: number, courseId: number) {
+  const seat = db
+    .select({ id: coupons.id })
+    .from(coupons)
+    .where(
+      and(eq(coupons.redeemedByUserId, userId), eq(coupons.courseId, courseId))
+    )
+    .get();
+  return seat !== undefined;
+}
+
 export function getSeatByCode(code: string) {
   return db.select().from(coupons).where(eq(coupons.code, code)).get();
 }
