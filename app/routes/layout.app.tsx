@@ -5,6 +5,8 @@ import { DevUI } from "~/components/dev-ui";
 import { Toaster } from "sonner";
 import { getCurrentUserId, getDevCountry } from "~/lib/session";
 import { getCountryTierInfo, COUNTRIES } from "~/lib/ppp";
+import { getKnockFeedConfig } from "~/lib/knock-feed.PROTOTYPE.server";
+import { NotificationsPrototype } from "~/components/notification-bell.PROTOTYPE";
 import { eq, and, or, sql, desc } from "drizzle-orm";
 import { db } from "~/db";
 import {
@@ -213,6 +215,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     countryTierInfo,
     countries: COUNTRIES,
     isTeamAdmin: currentUserId ? isTeamAdmin(currentUserId) : false,
+    knockFeed: await getKnockFeedConfig(currentUserId ?? null), // PROTOTYPE (#21)
   };
 }
 
@@ -225,18 +228,29 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
     countryTierInfo,
     countries,
     isTeamAdmin: userIsTeamAdmin,
+    knockFeed,
   } = loaderData;
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar
-        currentUser={currentUser}
-        recentCourses={recentCourses}
-        isTeamAdmin={userIsTeamAdmin}
-      />
-      <main className="flex-1 overflow-y-auto">
-        <Outlet />
-      </main>
+      {/* PROTOTYPE (#21): bell variants, ?variant=A|B|C */}
+      <NotificationsPrototype config={knockFeed}>
+        {(slots) => (
+          <>
+            <Sidebar
+              currentUser={currentUser}
+              recentCourses={recentCourses}
+              isTeamAdmin={userIsTeamAdmin}
+              headerSlot={slots.sidebarHeader}
+              navSlot={slots.sidebarNav}
+            />
+            <main className="flex-1 overflow-y-auto">
+              {slots.mainTopBar}
+              <Outlet />
+            </main>
+          </>
+        )}
+      </NotificationsPrototype>
       <DevUI
         users={users}
         currentUser={currentUser}
