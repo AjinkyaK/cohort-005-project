@@ -21,7 +21,7 @@ import {
   type RefundRequestForReview,
 } from "~/lib/refunds.server";
 import { RULE_BREAK_LABELS } from "~/lib/refund-rules";
-import { sendEmail } from "~/lib/mailer.server";
+import { notifyRefundDecided } from "~/lib/notifications.PROTOTYPE.server";
 
 const refundFilterSchema = z
   .nativeEnum(RefundStatus)
@@ -127,7 +127,9 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ error: result.error }, { status: result.status });
   }
 
-  await sendEmail(result.email);
+  // PROTOTYPE (issue #18): the decision is committed; now tell the buyer.
+  // In-app feed (Knock) + email (sendEmail), each failing on its own.
+  await notifyRefundDecided(result.refundDecided, result.email, platformAdmin);
 
   return {
     success: true,

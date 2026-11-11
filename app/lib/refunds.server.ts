@@ -32,6 +32,8 @@ import {
 // Every function takes the database first, so tests can hand in an in-memory
 // one. Uses positional parameters (project convention).
 
+import type { RefundDecided } from "~/lib/notifications.PROTOTYPE.server";
+
 export type Db = BetterSQLite3Database<typeof schema>;
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type Queryable = Db | Tx;
@@ -568,7 +570,28 @@ export function listTeamLicences(db: Queryable, buyerId: number, now: Date) {
 
 // ─── Deciding a Refund Request ───
 
-export type DecisionResult = { ok: true; email: Email } | Failure;
+// PROTOTYPE (issue #18): the result also carries the Notification's data.
+export type DecisionResult =
+  | { ok: true; email: Email; refundDecided: RefundDecided }
+  | Failure;
+
+function describeDecision(
+  db: Queryable,
+  refundRequestId: number,
+  purchase: Purchase,
+  decision: RefundStatus.Approved | RefundStatus.Declined,
+  note: string | null
+): RefundDecided {
+  const buyer = db.select().from(users).where(eq(users.id, purchase.userId)).get();
+  const course = db.select().from(courses).where(eq(courses.id, purchase.courseId)).get();
+  return {
+    refundRequestId,
+    buyer: { id: purchase.userId, name: buyer?.name ?? "", email: buyer?.email ?? "" },
+    decision,
+    courseTitle: course?.title ?? "your course",
+    note,
+  };
+}
 
 function findOpenRefundRequest(
   tx: Queryable,
@@ -680,6 +703,7 @@ export function approveRefundRequest(
     return {
       ok: true,
       email: buildDecisionEmail(tx, purchase, RefundStatus.Approved, note),
+      refundDecided: describeDecision(tx, refundRequestId, purchase, RefundStatus.Approved, note),
     };
   });
 }
@@ -728,6 +752,7 @@ export function declineRefundRequest(
         RefundStatus.Declined,
         trimmedNote
       ),
+      refundDecided: describeDecision(tx, refundRequestId, found.purchase, RefundStatus.Declined, trimmedNote),
     };
   });
 }
