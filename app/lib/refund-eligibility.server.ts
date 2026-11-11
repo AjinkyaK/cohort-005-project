@@ -22,7 +22,7 @@ import {
 } from "./refund-eligibility";
 
 /** Whether the Purchase has a Refund Request with the given status. */
-function hasRefundRequest(purchaseId: number, status: RefundStatus) {
+export function hasRefundRequest(purchaseId: number, status: RefundStatus) {
   const request = db
     .select({ id: refunds.id })
     .from(refunds)
@@ -35,7 +35,7 @@ function hasRefundRequest(purchaseId: number, status: RefundStatus) {
  * Watched Time, in seconds: the furthest point reached in each lesson, added
  * up across the given lessons. Skipping ahead counts as watching.
  */
-function getWatchedSeconds(userId: number, lessonIds: number[]) {
+export function getWatchedSeconds(userId: number, lessonIds: number[]) {
   if (lessonIds.length === 0) return 0;
 
   const furthestPerLesson = db
@@ -55,6 +55,16 @@ function getWatchedSeconds(userId: number, lessonIds: number[]) {
   return furthestPerLesson.reduce((total, row) => total + row.furthest, 0);
 }
 
+/** Whether the Purchase is a Team Licence: one that bought Seats. */
+export function isTeamLicence(purchaseId: number) {
+  const seat = db
+    .select({ id: coupons.id })
+    .from(coupons)
+    .where(eq(coupons.purchaseId, purchaseId))
+    .get();
+  return seat !== undefined;
+}
+
 /** Whether any team seat bought with the Purchase has been redeemed. */
 function hasClaimedSeat(purchaseId: number) {
   const seat = db
@@ -67,7 +77,7 @@ function hasClaimedSeat(purchaseId: number) {
   return seat !== undefined;
 }
 
-function getCompletedLessonCount(userId: number, lessonIds: number[]) {
+export function getCompletedLessonCount(userId: number, lessonIds: number[]) {
   if (lessonIds.length === 0) return 0;
 
   const result = db
@@ -84,7 +94,7 @@ function getCompletedLessonCount(userId: number, lessonIds: number[]) {
   return result?.count ?? 0;
 }
 
-function getLessonIdsForCourse(courseId: number): number[] {
+export function getLessonIdsForCourse(courseId: number): number[] {
   return db
     .select({ id: lessons.id })
     .from(lessons)
@@ -167,7 +177,10 @@ export function getRefundEligibility(
   return {
     eligible: true,
     purchase,
-    refundAmount: getRefundAmount(purchase, course),
+    refundAmount: getRefundAmount(
+      { ...purchase, isTeamLicence: isTeamLicence(purchase.id) },
+      course
+    ),
     lastDayOfRefundWindow: lastDayOfRefundWindow(purchase.createdAt),
   };
 }

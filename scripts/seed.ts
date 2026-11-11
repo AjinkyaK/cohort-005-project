@@ -2726,7 +2726,8 @@ This course is still in draft while the cluster examples are rewritten against t
   );
 
   // Four seats on Design Systems, bought during launch week, none redeemed yet.
-  createTeamPurchase(
+  // It gets an Open Refund Request below, so its Seats are held.
+  const novakTeamLicence = createTeamPurchase(
     "marta.novak@student.dev",
     course3,
     4,
@@ -2859,6 +2860,18 @@ This course is still in draft while the cluster examples are rewritten against t
       })
       .run();
   });
+
+  // A Team Licence with an Open Refund Request and no Claimed Seats, so a
+  // Platform Admin can approve one even though the team page can't raise one
+  // yet. Its Seats are held until the request is resolved (ADR 0002).
+  db.insert(schema.refunds)
+    .values({
+      purchaseId: novakTeamLicence.purchase.id,
+      status: RefundStatus.Open,
+      reason: "Our team's design system project was cancelled.",
+      requestedAt: daysAgo(1),
+    })
+    .run();
 
   console.log(`Created ${countRows(schema.refunds)} refund requests.`);
 

@@ -1,5 +1,5 @@
 import { data } from "react-router";
-import { eq, and } from "drizzle-orm";
+import { and, desc, eq, notExists } from "drizzle-orm";
 import { db } from "~/db";
 import {
   UserRole,
@@ -7,6 +7,8 @@ import {
   courses,
   enrollments,
   purchases,
+  refunds,
+  RefundStatus,
 } from "~/db/schema";
 import { getCurrentUserId } from "~/lib/session";
 import { resolveCountry } from "~/lib/country.server";
@@ -34,11 +36,32 @@ function isUserEnrolled(userId: number, courseId: number) {
   return !!findEnrollment(userId, courseId);
 }
 
+/**
+ * The learner's Purchase of the course that isn't a Refunded Purchase. After a
+ * refund and a re-buy they hold more than one (ADR 0003).
+ */
 function findPurchase(userId: number, courseId: number) {
   return db
     .select()
     .from(purchases)
-    .where(and(eq(purchases.userId, userId), eq(purchases.courseId, courseId)))
+    .where(
+      and(
+        eq(purchases.userId, userId),
+        eq(purchases.courseId, courseId),
+        notExists(
+          db
+            .select({ id: refunds.id })
+            .from(refunds)
+            .where(
+              and(
+                eq(refunds.purchaseId, purchases.id),
+                eq(refunds.status, RefundStatus.Approved)
+              )
+            )
+        )
+      )
+    )
+    .orderBy(desc(purchases.createdAt))
     .get();
 }
 
@@ -199,4 +222,19 @@ export async function requireInstructorOrAdmin(request: Request) {
   }
 
   return { userId, user, isAdmin: user.role === UserRole.Admin };
+}
+
+/**
+ * Throws 401 when signed out, 403 unless the user is a Platform Admin. Use in
+ * both the loader and the action of every admin page.
+ */
+export async function requirePlatformAdmin(request: Request) {
+  const userId = await requireUserId(request);
+  const user = getUserById(userId);
+
+  if (!user || user.role !== UserRole.Admin) {
+    throw data("Only Platform Admins can access this page.", { status: 403 });
+  }
+
+  return { userId, user };
 }

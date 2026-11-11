@@ -8,26 +8,40 @@ An online course platform where learners buy courses, work through lessons, and 
 A learner paying for a course; the record of what was paid, when, and from which country.
 _Avoid_: Order, transaction
 
+**Individual Purchase**:
+A Purchase of one place on a course, for the buyer themselves. It enrols the buyer.
+
+**Team Licence**:
+A Purchase of several Seats on a course for a team, made by its Team Admin. It does not enrol the Team Admin; they take a place only by claiming one of its Seats like anyone else.
+_Avoid_: Team purchase, bulk purchase
+
+**Seat**:
+One place on a course bought as part of a Team Licence, which anyone can claim once to become enrolled. While its Team Licence is not refunded, every Seat is in exactly one state: Available, Held or Claimed. Once the Team Licence is refunded, its Seats can never be claimed.
+_Avoid_: Coupon, code (for the Seat itself), Unclaimed Seat (it lumps together Available Seats, Held Seats and Seats on a Refunded Team Licence)
+
+**Available Seat**:
+A Seat that can be claimed right now: nobody has claimed it, and its Team Licence has neither an Open nor an Approved Refund Request.
+
 **Enrollment**:
-A learner's access to a course. It can come from a Purchase or from a redeemed team seat, so being enrolled does not mean a learner bought the course.
+A learner's access to a course. It can come from an Individual Purchase or from a Claimed Seat, so being enrolled does not mean a learner bought the course. A learner has at most one Enrollment per course, and it does not record where it came from. It ends when a Refund Request on the learner's Individual Purchase of the course is Approved, and not before, unless they also hold a Claimed Seat on that course; either way, the learner's progress is kept.
 _Avoid_: Registration, subscription
 
 ## Refunds
 
 **Refund Request**:
-A learner's request, with a written reason, for the money from one of their own Purchases to be given back. It always belongs to a Purchase, never directly to an Enrollment.
+A buyer's request, with a written reason, for the money from one specific Purchase of their own to be given back; the buyer chooses which. A Refund Request on an Individual Purchase is raised from the course page, and one on a Team Licence from the team page. It always belongs to a Purchase, never directly to an Enrollment.
 _Avoid_: Cancellation, Reversal, Chargeback, Refund (for the request itself)
 
 **Refund**:
-Money being given back to the learner, once an Admin approves a Refund Request. A learner counts as refunded from the moment of approval, whatever its Payment Transfer Status; when the money actually reaches their bank is outside the platform and is not tracked.
+Money being given back to the learner, once a Platform Admin approves a Refund Request. A learner counts as refunded from the moment of approval, whatever its Payment Transfer Status; when the money actually reaches their bank is outside the platform and is not tracked.
 _Avoid_: Reversal, Chargeback, Delivered, Settled, Paid out
 
 **Refund Amount**:
-The figure quoted to the learner when they make a Refund Request: what they paid if they bought at a purchasing-power discount, otherwise the course's current list price. It is a quote, not a record of what was given back.
+The figure quoted to the learner when they make a Refund Request: for a Team Licence, what was paid; for an Individual Purchase, what was paid if it was bought at a purchasing-power discount, otherwise the course's current list price. It is a quote, not a record of what was given back.
 _Avoid_: Refundable amount
 
 **Amount Refunded**:
-The figure an Admin records when approving a Refund Request; the only record of what was actually given back. It is normally the same as the Refund Amount but can differ, for example if the course was repriced in between.
+The figure a Platform Admin records when approving a Refund Request; the only record of what was actually given back. It is normally the same as the Refund Amount but can differ, for example if the course was repriced in between.
 _Avoid_: Refund Amount (for the recorded figure)
 
 **Open** (Refund Request status):
@@ -35,13 +49,18 @@ A Refund Request that no Admin has resolved yet. A Purchase can have at most one
 _Avoid_: Requested, Pending
 
 **Approved** (Refund Request status):
-An Admin has accepted the Refund Request, so a Refund is due. Approved is final within the platform, even if the Refund's Payment Transfer Status later becomes Failed or Canceled.
+A Platform Admin has accepted the Refund Request, so a Refund is due. Approved is final within the platform, even if the Refund's Payment Transfer Status later becomes Failed or Canceled.
 
 **Declined** (Refund Request status):
-An Admin has turned the Refund Request down, so nothing is given back. A Declined request does not stop the learner raising a new one while they are still eligible.
+A Platform Admin has turned the Refund Request down, so nothing is given back. A Declined request does not stop the learner raising a new one while they are still eligible.
 
-**Admin**:
-The only kind of user who can resolve an Open Refund Request, by approving or declining it.
+**Platform Admin**:
+Someone who runs the platform itself, and the only kind of user who can resolve an Open Refund Request, by approving or declining it.
+_Avoid_: Admin (on its own), Team Admin
+
+**Team Admin**:
+The member of a team who manages its seats. A Team Admin has no say over Refund Requests, not even on their own team's Purchase.
+_Avoid_: Admin (on its own)
 
 ## Payment transfers
 
@@ -67,7 +86,7 @@ The payment service needs something more before it can send the money, such as t
 ## Refund Eligibility
 
 **Refund Eligibility**:
-Whether a learner may raise a Refund Request on a Purchase right now. It is judged per Purchase, only at the moment the request is raised; an Admin's later decision is not bound by it. A Purchase is eligible only when every rule below holds.
+Whether a learner may raise a Refund Request on a Purchase right now. It is judged per Purchase, only at the moment the request is raised; a Platform Admin's later decision is not bound by it. A Purchase is eligible only when every rule below holds.
 _Avoid_: Cancellation offer, cancellable
 
 **Refund Window**:
@@ -78,14 +97,18 @@ _Avoid_: Cancel window
 How much of a course's video a learner has seen: the furthest point reached in each lesson, added up across the course. Skipping ahead counts as watching. It belongs to the learner and course, so it carries over between Purchases.
 
 **Watch Limit**:
-Two hours of Watched Time. A learner at or past it is no longer eligible.
+Two hours of Watched Time. A learner at or past it is no longer eligible. It applies only to Individual Purchases.
 
 **Completion Limit**:
-Half of a course's lessons completed. A learner at or past it is no longer eligible; a course with no lessons has no Completion Limit.
+Half of a course's lessons completed. A learner at or past it is no longer eligible; a course with no lessons has no Completion Limit. It applies only to Individual Purchases.
 
 **Claimed Seat**:
-A team seat that a colleague has redeemed. A team Purchase with any Claimed Seat cannot be refunded at all, even for its unclaimed seats.
+A Seat that someone has claimed, whoever they are, the Team Admin included. A Team Licence with any Claimed Seat is not eligible for a refund, even for its other Seats.
 _Avoid_: Redeemed coupon, used seat
 
+**Held Seat**:
+A Seat that would be Available, except that its Team Licence has an Open Refund Request, so it cannot be claimed until the request is resolved. If the request is Declined it becomes Available again; if Approved, it can never be claimed. Because Seats are held, a Team Licence never gains a Claimed Seat while its Refund Request is Open.
+_Avoid_: Frozen seat, locked seat
+
 **Refunded Purchase**:
-A Purchase with an Approved Refund Request. Buying the course again creates a new Purchase with its own Refund Window.
+A Purchase with an Approved Refund Request. The buyer's Enrollment in the course ends, unless they also hold a Claimed Seat on it; no Seat on a Team Licence can be claimed any more. Buying the course again creates a new Purchase with its own Refund Window.
