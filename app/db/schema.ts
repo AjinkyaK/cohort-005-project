@@ -32,9 +32,19 @@ export enum QuestionType {
 }
 
 export enum RefundStatus {
-  Requested = "requested",
+  Open = "open",
   Approved = "approved",
   Declined = "declined",
+}
+
+// The payment service's latest report on a Refund. See "Payment transfers" in
+// GLOSSARY.md.
+export enum PaymentTransferStatus {
+  Pending = "pending",
+  Succeeded = "succeeded",
+  Failed = "failed",
+  Canceled = "canceled",
+  RequiresAction = "requires_action",
 }
 
 export enum TeamMemberRole {
@@ -239,7 +249,7 @@ export const refunds = sqliteTable(
     status: text("status")
       .notNull()
       .$type<RefundStatus>()
-      .default(RefundStatus.Requested),
+      .default(RefundStatus.Open),
     // The learner's own words, in the box on the course page.
     reason: text("reason").notNull(),
     // Null until someone approves — a declined request refunds nothing.
@@ -249,6 +259,13 @@ export const refunds = sqliteTable(
       .$defaultFn(() => new Date().toISOString()),
     resolvedAt: text("resolved_at"),
     resolvedByUserId: integer("resolved_by_user_id").references(() => users.id),
+    // The payment service's latest report on the money going back. Only an
+    // Approved request can have one; Open and Declined requests stay null.
+    // Null means the payment service hasn't reported anything yet. Each new
+    // report overwrites the previous one — no history is kept.
+    paymentTransferStatus: text(
+      "payment_transfer_status"
+    ).$type<PaymentTransferStatus>(),
   },
   (table) => [index("refunds_purchase_idx").on(table.purchaseId)]
 );
