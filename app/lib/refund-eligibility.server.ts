@@ -22,7 +22,7 @@ import {
 } from "./refund-eligibility";
 
 /** Whether the Purchase has a Refund Request with the given status. */
-function hasRefundRequest(purchaseId: number, status: RefundStatus) {
+export function hasRefundRequest(purchaseId: number, status: RefundStatus) {
   const request = db
     .select({ id: refunds.id })
     .from(refunds)

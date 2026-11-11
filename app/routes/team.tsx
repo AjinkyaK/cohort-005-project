@@ -16,6 +16,7 @@ import {
   TeamMemberRole,
 } from "~/db/schema";
 import { eq, and } from "drizzle-orm";
+import { getSeatState, type SeatState } from "~/lib/seats.server";
 
 function getTeamForAdmin(userId: number) {
   const membership = db
@@ -52,6 +53,7 @@ interface CourseStats {
   courseSlug: string;
   totalSeats: number;
   claimedSeats: number;
+  heldSeats: number;
 }
 
 interface CouponRow {
@@ -59,6 +61,7 @@ interface CouponRow {
   code: string;
   courseId: number;
   courseTitle: string;
+  state: SeatState;
   redeemedByEmail: string | null;
   createdAt: string;
 }
@@ -85,7 +88,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     });
   }
 
-  const allCoupons = getCouponsForTeam(team.id);
+  const allCoupons = getCouponsForTeam(team.id).map((coupon) => ({
+    ...coupon,
+    state: getSeatState(coupon),
+  }));
 
   // Build per-course stats
   const courseMap = new Map<
@@ -96,6 +102,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       courseSlug: string;
       total: number;
       claimed: number;
+      held: number;
     }
   >();
 
@@ -108,13 +115,13 @@ export async function loader({ request }: Route.LoaderArgs) {
         courseSlug: course?.slug ?? "",
         total: 0,
         claimed: 0,
+        held: 0,
       });
     }
     const entry = courseMap.get(coupon.courseId)!;
     entry.total++;
-    if (coupon.redeemedByUserId !== null) {
-      entry.claimed++;
-    }
+    if (coupon.state === "claimed") entry.claimed++;
+    if (coupon.state === "held") entry.held++;
   }
 
   const courseStats: CourseStats[] = Array.from(courseMap.values()).map(
@@ -124,6 +131,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       courseSlug: e.courseSlug,
       totalSeats: e.total,
       claimedSeats: e.claimed,
+      heldSeats: e.held,
     })
   );
 
@@ -140,6 +148,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       code: coupon.code,
       courseId: coupon.courseId,
       courseTitle: course?.title ?? "Unknown Course",
+      state: coupon.state,
       redeemedByEmail,
       createdAt: coupon.createdAt,
     };
@@ -230,6 +239,11 @@ export default function Team({ loaderData }: Route.ComponentProps) {
                     <p className="text-xs text-muted-foreground">
                       seats claimed
                     </p>
+                    {stat.heldSeats > 0 && (
+                      <p className="text-xs text-amber-700 dark:text-amber-400">
+                        {stat.heldSeats} on hold while a Refund Request is open
+                      </p>
+                    )}
                   </div>
                   <Link to={`/courses/${stat.courseSlug}/purchase?mode=team`}>
                     <Button variant="outline" size="sm">
@@ -292,18 +306,22 @@ export default function Team({ loaderData }: Route.ComponentProps) {
                       {coupon.courseTitle}
                     </td>
                     <td className="px-4 py-3">
-                      {coupon.redeemedByEmail ? (
+                      {coupon.state === "claimed" ? (
                         <span className="text-muted-foreground">
-                          Claimed by {coupon.redeemedByEmail}
+                          Claimed by {coupon.redeemedByEmail ?? "unknown user"}
+                        </span>
+                      ) : coupon.state === "held" ? (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                          On hold
                         </span>
                       ) : (
                         <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                          Unclaimed
+                          Available
                         </span>
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {!coupon.redeemedByEmail && (
+                      {coupon.state === "available" && (
                         <CopyButton code={coupon.code} />
                       )}
                     </td>
