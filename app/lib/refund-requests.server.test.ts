@@ -7,6 +7,7 @@ import {
   declineRefundRequest,
   getOpenRefundRequests,
   getRefundRequestsForLearner,
+  getResolvedRefundRequests,
 } from "./refund-requests.server";
 import {
   getCompletedLessonCount,
@@ -626,5 +627,94 @@ describe("getRefundRequestsForLearner", () => {
         resolvedAt: "2026-03-04T10:00:00.000Z",
       }),
     ]);
+  });
+});
+
+describe("getResolvedRefundRequests", () => {
+  it("lists Approved and Declined requests, most recently resolved first, and leaves out Open ones", () => {
+    const admin = addPlatformAdmin();
+    requestRefund(buy(base.user.id).id);
+    const declined = requestRefund(buy(addLearner("Bea").id).id, {
+      status: schema.RefundStatus.Declined,
+      resolvedAt: "2026-03-05T10:00:00.000Z",
+      resolvedByUserId: admin.id,
+    });
+    const approved = requestRefund(buy(addLearner("Cal").id).id, {
+      status: schema.RefundStatus.Approved,
+      amountRefunded: 4900,
+      resolvedAt: "2026-03-07T10:00:00.000Z",
+      resolvedByUserId: admin.id,
+    });
+
+    const requests = getResolvedRefundRequests();
+
+    expect(requests.map((r) => r.id)).toEqual([approved.id, declined.id]);
+    expect(requests[1]).toMatchObject({
+      status: schema.RefundStatus.Declined,
+      resolvedAt: "2026-03-05T10:00:00.000Z",
+      resolvedBy: { id: admin.id, name: "Pat Admin" },
+      buyer: { name: "Bea" },
+      course: { title: "Test Course" },
+    });
+  });
+
+  it("shows an Approved request's Amount Refunded and Payment Transfer Status, or none when the payment service hasn't reported one", () => {
+    const reported = requestRefund(buy(base.user.id).id, {
+      status: schema.RefundStatus.Approved,
+      amountRefunded: 3900,
+      resolvedAt: "2026-03-07T10:00:00.000Z",
+      paymentTransferStatus: schema.PaymentTransferStatus.Succeeded,
+    });
+    const unreported = requestRefund(buy(addLearner("Bea").id).id, {
+      status: schema.RefundStatus.Approved,
+      amountRefunded: 4900,
+      resolvedAt: "2026-03-06T10:00:00.000Z",
+    });
+
+    expect(getResolvedRefundRequests()).toEqual([
+      expect.objectContaining({
+        id: reported.id,
+        amountRefunded: 3900,
+        paymentTransferStatus: schema.PaymentTransferStatus.Succeeded,
+      }),
+      expect.objectContaining({
+        id: unreported.id,
+        amountRefunded: 4900,
+        paymentTransferStatus: null,
+      }),
+    ]);
+  });
+
+  it("flags a Failed or Canceled transfer as money still owed", () => {
+    const statuses = Object.values(schema.PaymentTransferStatus);
+    for (const paymentTransferStatus of [...statuses, null]) {
+      requestRefund(buy(base.user.id).id, {
+        status: schema.RefundStatus.Approved,
+        amountRefunded: 4900,
+        resolvedAt: "2026-03-07T10:00:00.000Z",
+        paymentTransferStatus,
+      });
+    }
+    requestRefund(buy(addLearner("Bea").id).id, {
+      status: schema.RefundStatus.Declined,
+      resolvedAt: "2026-03-07T10:00:00.000Z",
+    });
+
+    const owed = Object.fromEntries(
+      getResolvedRefundRequests().map((r) => [
+        r.paymentTransferStatus ?? r.status,
+        r.moneyStillOwed,
+      ])
+    );
+
+    expect(owed).toEqual({
+      pending: false,
+      succeeded: false,
+      failed: true,
+      canceled: true,
+      requires_action: false,
+      approved: false,
+      declined: false,
+    });
   });
 });

@@ -1,8 +1,10 @@
 // Refund Requests: the Platform Admin resolving them, and the learner seeing their own. See GLOSSARY.md.
 
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import { db } from "~/db";
 import {
+  PaymentTransferStatus,
   RefundStatus,
   coupons,
   courses,
@@ -220,4 +222,49 @@ export function getRefundRequestsForLearner(userId: number) {
     .where(eq(purchases.userId, userId))
     .orderBy(desc(refunds.requestedAt), desc(refunds.id))
     .all();
+}
+
+const resolvers = alias(users, "resolvers");
+
+/** Every Approved and Declined Refund Request, most recently resolved first. */
+export function getResolvedRefundRequests() {
+  const rows = db
+    .select({
+      id: refunds.id,
+      status: refunds.status,
+      reason: refunds.reason,
+      requestedAt: refunds.requestedAt,
+      resolvedAt: refunds.resolvedAt,
+      resolvedBy: { id: resolvers.id, name: resolvers.name },
+      buyer: { id: users.id, name: users.name, email: users.email },
+      course: { id: courses.id, title: courses.title, slug: courses.slug },
+      amountRefunded: refunds.amountRefunded,
+      paymentTransferStatus: refunds.paymentTransferStatus,
+    })
+    .from(refunds)
+    .innerJoin(purchases, eq(refunds.purchaseId, purchases.id))
+    .innerJoin(users, eq(purchases.userId, users.id))
+    .innerJoin(courses, eq(purchases.courseId, courses.id))
+    .leftJoin(resolvers, eq(refunds.resolvedByUserId, resolvers.id))
+    .where(
+      inArray(refunds.status, [RefundStatus.Approved, RefundStatus.Declined])
+    )
+    .orderBy(desc(refunds.resolvedAt), desc(refunds.id))
+    .all();
+
+  return rows.map((row) => ({
+    ...row,
+    moneyStillOwed: isMoneyStillOwed(row.paymentTransferStatus),
+  }));
+}
+
+/**
+ * A Failed or Canceled transfer means the Refund never went out. The request
+ * stays Approved, so the money is still owed to the learner.
+ */
+function isMoneyStillOwed(status: PaymentTransferStatus | null) {
+  return (
+    status === PaymentTransferStatus.Failed ||
+    status === PaymentTransferStatus.Canceled
+  );
 }
