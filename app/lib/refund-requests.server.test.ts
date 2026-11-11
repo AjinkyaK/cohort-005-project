@@ -440,47 +440,86 @@ describe("approveRefundRequest", () => {
     });
   });
 
-  it("refuses a request on a Team Licence, and leaves it Open", () => {
-    const admin = addPlatformAdmin();
-    const purchase = buy(base.user.id);
-    const team = holder.db.insert(schema.teams).values({}).returning().get();
-    holder.db
-      .insert(schema.coupons)
-      .values({
-        teamId: team.id,
-        courseId: base.course.id,
-        code: "SEAT-1",
-        purchaseId: purchase.id,
-      })
-      .run();
-    const request = requestRefund(purchase.id);
+  describe("on a Team Licence", () => {
+    /** A Team Licence bought by the Team Admin, with two Seats nobody has claimed. */
+    function buyTeamLicence(teamAdminId: number) {
+      const purchase = buy(teamAdminId, { amountPaid: 9800 });
+      const team = holder.db.insert(schema.teams).values({}).returning().get();
+      const seats = [1, 2].map((n) =>
+        holder.db
+          .insert(schema.coupons)
+          .values({
+            teamId: team.id,
+            courseId: base.course.id,
+            code: `SEAT-${purchase.id}-${n}`,
+            purchaseId: purchase.id,
+          })
+          .returning()
+          .get()
+      );
+      return { purchase, seats };
+    }
 
-    const result = approveRefundRequest(request.id, admin.id, 4900);
+    it("approves the whole Licence, recording the Amount Refunded, when and by whom", () => {
+      const admin = addPlatformAdmin();
+      const { purchase } = buyTeamLicence(base.user.id);
+      const request = requestRefund(purchase.id);
+      const now = new Date("2026-03-04T10:00:00.000Z");
 
-    expect(result).toEqual({ ok: false, reason: "team-licence" });
-    expect(getOpenRefundRequests().map((r) => r.id)).toEqual([request.id]);
-  });
+      const result = approveRefundRequest(request.id, admin.id, 9800, now);
 
-  it("reports an already-resolved Team Licence request as already resolved", () => {
-    const admin = addPlatformAdmin();
-    const purchase = buy(base.user.id);
-    const team = holder.db.insert(schema.teams).values({}).returning().get();
-    holder.db
-      .insert(schema.coupons)
-      .values({
-        teamId: team.id,
-        courseId: base.course.id,
-        code: "SEAT-1",
-        purchaseId: purchase.id,
-      })
-      .run();
-    const request = requestRefund(purchase.id, {
-      status: schema.RefundStatus.Declined,
+      expect(result).toMatchObject({
+        ok: true,
+        refundRequest: {
+          id: request.id,
+          status: schema.RefundStatus.Approved,
+          amountRefunded: 9800,
+          resolvedAt: "2026-03-04T10:00:00.000Z",
+          resolvedByUserId: admin.id,
+          paymentTransferStatus: null,
+        },
+      });
+      expect(getOpenRefundRequests()).toEqual([]);
     });
 
-    expect(approveRefundRequest(request.id, admin.id, 4900)).toEqual({
-      ok: false,
-      reason: "already-resolved",
+    it("ends no Enrollment, not even the Team Admin's own from an Individual Purchase", () => {
+      const admin = addPlatformAdmin();
+      const bea = addLearner("Bea");
+      // The Team Admin bought a place for themselves too, and Bea is enrolled.
+      buy(base.user.id);
+      holder.db
+        .insert(schema.enrollments)
+        .values([
+          { userId: base.user.id, courseId: base.course.id },
+          { userId: bea.id, courseId: base.course.id },
+        ])
+        .run();
+      const { purchase } = buyTeamLicence(base.user.id);
+      const request = requestRefund(purchase.id);
+
+      const result = approveRefundRequest(request.id, admin.id, 9800);
+
+      expect(result.ok).toBe(true);
+      const enrolled = holder.db
+        .select({ userId: schema.enrollments.userId })
+        .from(schema.enrollments)
+        .where(eq(schema.enrollments.courseId, base.course.id))
+        .all()
+        .map((e) => e.userId);
+      expect(enrolled.sort()).toEqual([base.user.id, bea.id].sort());
+    });
+
+    it("reports an already-resolved request as already resolved", () => {
+      const admin = addPlatformAdmin();
+      const { purchase } = buyTeamLicence(base.user.id);
+      const request = requestRefund(purchase.id, {
+        status: schema.RefundStatus.Declined,
+      });
+
+      expect(approveRefundRequest(request.id, admin.id, 9800)).toEqual({
+        ok: false,
+        reason: "already-resolved",
+      });
     });
   });
 

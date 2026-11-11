@@ -3,7 +3,10 @@ import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
 import { eq } from "drizzle-orm";
 import { claimSeat, getSeatByCode, getSeatState } from "./seats.server";
-import { declineRefundRequest } from "./refund-requests.server";
+import {
+  approveRefundRequest,
+  declineRefundRequest,
+} from "./refund-requests.server";
 
 const holder = vi.hoisted(() => ({
   db: undefined as unknown as ReturnType<typeof createTestDb>,
@@ -68,6 +71,18 @@ function addLearner(name: string) {
     .get();
 }
 
+function addPlatformAdmin() {
+  return holder.db
+    .insert(schema.users)
+    .values({
+      name: "Pat Admin",
+      email: "pat@example.com",
+      role: schema.UserRole.Admin,
+    })
+    .returning()
+    .get();
+}
+
 describe("getSeatState", () => {
   it("is Available when nobody has claimed it and there is no Refund Request", () => {
     const { seat } = buyTeamLicence();
@@ -101,20 +116,22 @@ describe("getSeatState", () => {
   it("goes from Held back to Available when a Platform Admin declines the Refund Request", () => {
     const { purchase, seat } = buyTeamLicence();
     const refundRequest = requestRefund(purchase.id, schema.RefundStatus.Open);
-    const admin = holder.db
-      .insert(schema.users)
-      .values({
-        name: "Pat Admin",
-        email: "pat@example.com",
-        role: schema.UserRole.Admin,
-      })
-      .returning()
-      .get();
+    const admin = addPlatformAdmin();
     expect(getSeatState(seat)).toBe("held");
 
     declineRefundRequest(refundRequest.id, admin.id);
 
     expect(getSeatState(seat)).toBe("available");
+  });
+
+  it("is on a Refunded Team Licence once a Platform Admin approves the Refund Request", () => {
+    const { purchase, seat } = buyTeamLicence();
+    const refundRequest = requestRefund(purchase.id, schema.RefundStatus.Open);
+    const admin = addPlatformAdmin();
+
+    approveRefundRequest(refundRequest.id, admin.id, purchase.amountPaid);
+
+    expect(getSeatState(seat)).toBe("refunded");
   });
 
   it("is not Held by another Team Licence's Open Refund Request", () => {
@@ -148,6 +165,23 @@ describe("claimSeat", () => {
     });
     expect(enrollmentsOf(learner.id)).toEqual([]);
     expect(getSeatState(seat)).toBe("held");
+  });
+
+  it("refuses a Seat on a Refunded Team Licence as no longer claimable, and enrols nobody", () => {
+    const { purchase, seat } = buyTeamLicence();
+    const refundRequest = requestRefund(purchase.id, schema.RefundStatus.Open);
+    approveRefundRequest(refundRequest.id, addPlatformAdmin().id, purchase.amountPaid);
+    const learner = addLearner("Ada");
+
+    const result = claimSeat(seat.code, learner.id, "US");
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "This seat can no longer be claimed, because its Team Licence has been refunded.",
+    });
+    expect(enrollmentsOf(learner.id)).toEqual([]);
+    expect(getSeatState(seat)).toBe("refunded");
   });
 
   it("claims the Seat once its Refund Request is Declined", () => {

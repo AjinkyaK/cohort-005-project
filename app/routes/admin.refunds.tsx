@@ -89,10 +89,6 @@ export async function action({ request }: Route.ActionArgs) {
       throw data("This Refund Request has already been resolved.", {
         status: 409,
       });
-    case "team-licence":
-      throw data("Approving a Team Licence Refund Request isn't supported yet.", {
-        status: 409,
-      });
   }
 }
 
@@ -170,7 +166,9 @@ function ApproveForm({ request }: { request: OpenRefundRequest }) {
       onSubmit={(event) => {
         if (
           !confirm(
-            "Approve this Refund Request? The learner loses access to the course, and this can't be undone."
+            request.purchaseKind === "team-licence"
+              ? "Approve this Refund Request? The whole Team Licence is refunded and none of its Seats can ever be claimed. This can't be undone."
+              : "Approve this Refund Request? The learner loses access to the course, and this can't be undone."
           )
         ) {
           event.preventDefault();
@@ -254,13 +252,7 @@ function OpenRefundRequestRow({ request }: { request: OpenRefundRequest }) {
         </div>
       </td>
       <td className="space-y-2 px-4 py-3">
-        {request.purchaseKind === "individual" ? (
-          <ApproveForm request={request} />
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            Team Licence approval coming soon
-          </p>
-        )}
+        <ApproveForm request={request} />
         <DeclineButton refundId={request.id} />
       </td>
     </tr>

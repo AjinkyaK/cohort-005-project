@@ -70,11 +70,12 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   const seatState = getSeatState(coupon);
   const alreadyRedeemed = seatState === "claimed";
   const onHold = seatState === "held";
+  const refunded = seatState === "refunded";
   const alreadyEnrolled = isUserEnrolled(currentUserId, coupon.courseId);
 
   // Check country mismatch upfront so we can show a clear message
   let countryMismatch = false;
-  if (!alreadyRedeemed && !onHold && !alreadyEnrolled) {
+  if (!alreadyRedeemed && !refunded && !onHold && !alreadyEnrolled) {
     const userCountry = await resolveCountry(request);
     const purchase = db
       .select()
@@ -90,6 +91,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     course: { id: course.id, title: course.title, slug: course.slug },
     code,
     alreadyRedeemed,
+    refunded,
     onHold,
     alreadyEnrolled,
     countryMismatch,
@@ -134,6 +136,7 @@ export default function Redeem({
     course,
     code,
     alreadyRedeemed,
+    refunded,
     onHold,
     alreadyEnrolled,
     countryMismatch,
@@ -179,6 +182,18 @@ export default function Redeem({
               <p className="mt-2 text-sm text-muted-foreground">
                 Someone has already claimed this seat. Please ask the person who
                 shared this link for a new coupon.
+              </p>
+            </div>
+          ) : refunded ? (
+            <div className="rounded-lg bg-destructive/10 p-4">
+              <div className="flex items-center justify-center gap-2 text-destructive">
+                <AlertCircle className="size-5" />
+                <span className="font-medium">
+                  This seat can no longer be claimed
+                </span>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                The team licence this seat belonged to has been refunded.
               </p>
             </div>
           ) : onHold ? (

@@ -53,20 +53,39 @@ describe("Refund Amount", () => {
   it("quotes what was paid when the Purchase had a purchasing-power discount", () => {
     // India gets a purchasing-power discount, so the learner paid less.
     expect(
-      getRefundAmount({ amountPaid: 3950, country: "IN" }, { price: 7900 })
+      getRefundAmount({ amountPaid: 3950, country: "IN", isTeamLicence: false }, { price: 7900 })
     ).toBe(3950);
   });
 
   it("quotes the course's current list price otherwise", () => {
     // Bought at $79, since repriced to $99: the quote follows the course.
     expect(
-      getRefundAmount({ amountPaid: 7900, country: "US" }, { price: 9900 })
+      getRefundAmount({ amountPaid: 7900, country: "US", isTeamLicence: false }, { price: 9900 })
     ).toBe(9900);
   });
 
   it("quotes the list price when the Purchase has no country", () => {
     expect(
-      getRefundAmount({ amountPaid: 7900, country: null }, { price: 7900 })
+      getRefundAmount({ amountPaid: 7900, country: null, isTeamLicence: false }, { price: 7900 })
     ).toBe(7900);
+  });
+
+  it("quotes what was paid for a Team Licence bought at full price", () => {
+    // Five Seats at $79 each, since repriced to $99: the quote is still what was paid.
+    expect(
+      getRefundAmount(
+        { amountPaid: 39500, country: "US", isTeamLicence: true },
+        { price: 9900 }
+      )
+    ).toBe(39500);
+  });
+
+  it("quotes what was paid for a Team Licence bought at a purchasing-power discount", () => {
+    expect(
+      getRefundAmount(
+        { amountPaid: 19750, country: "IN", isTeamLicence: true },
+        { price: 7900 }
+      )
+    ).toBe(19750);
   });
 });

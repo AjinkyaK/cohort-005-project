@@ -32,13 +32,15 @@ export function isWithinRefundWindow(
 }
 
 /**
- * The Refund Amount quoted to the learner: what they paid if they bought at a
+ * The Refund Amount quoted to the buyer: for a Team Licence, what was paid
+ * (ADR 0002); for an Individual Purchase, what was paid if it was bought at a
  * purchasing-power discount, otherwise the course's current list price.
  */
 export function getRefundAmount(
-  purchase: { amountPaid: number; country: string | null },
+  purchase: { amountPaid: number; country: string | null; isTeamLicence: boolean },
   course: { price: number }
 ): number {
+  if (purchase.isTeamLicence) return purchase.amountPaid;
   return getDiscountForCountry(purchase.country) > 0
     ? purchase.amountPaid
     : course.price;

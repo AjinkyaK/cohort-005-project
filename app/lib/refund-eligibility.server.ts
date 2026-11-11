@@ -55,6 +55,16 @@ export function getWatchedSeconds(userId: number, lessonIds: number[]) {
   return furthestPerLesson.reduce((total, row) => total + row.furthest, 0);
 }
 
+/** Whether the Purchase is a Team Licence: one that bought Seats. */
+export function isTeamLicence(purchaseId: number) {
+  const seat = db
+    .select({ id: coupons.id })
+    .from(coupons)
+    .where(eq(coupons.purchaseId, purchaseId))
+    .get();
+  return seat !== undefined;
+}
+
 /** Whether any team seat bought with the Purchase has been redeemed. */
 function hasClaimedSeat(purchaseId: number) {
   const seat = db
@@ -167,7 +177,10 @@ export function getRefundEligibility(
   return {
     eligible: true,
     purchase,
-    refundAmount: getRefundAmount(purchase, course),
+    refundAmount: getRefundAmount(
+      { ...purchase, isTeamLicence: isTeamLicence(purchase.id) },
+      course
+    ),
     lastDayOfRefundWindow: lastDayOfRefundWindow(purchase.createdAt),
   };
 }

@@ -18,8 +18,9 @@ import {
   getCompletedLessonCount,
   getLessonIdsForCourse,
   getWatchedSeconds,
+  isTeamLicence,
 } from "./refund-eligibility.server";
-import { holdsClaimedSeat, isTeamLicence } from "./seats.server";
+import { holdsClaimedSeat } from "./seats.server";
 
 export type PurchaseKind = "individual" | "team-licence";
 
@@ -57,29 +58,18 @@ export function getOpenRefundRequests() {
     .orderBy(asc(refunds.requestedAt), asc(refunds.id))
     .all();
 
-  return rows.map(({ isTeamLicence, country, ...row }) => {
-    if (isTeamLicence) {
-      return {
-        ...row,
-        purchaseKind: "team-licence" as PurchaseKind,
-        // A Team Licence's Refund Amount is what was paid, and its buyer's own
-        // viewing says nothing about whether the team used it (ADR 0002).
-        refundAmount: row.amountPaid,
-        progress: null,
-      };
-    }
-
-    return {
-      ...row,
-      purchaseKind: "individual" as PurchaseKind,
-      refundAmount: getRefundAmount(
-        { amountPaid: row.amountPaid, country },
-        row.course
-      ),
-      // Live numbers, not a snapshot from when the request was raised (ADR 0003).
-      progress: getProgress(row.buyer.id, row.course.id),
-    };
-  });
+  return rows.map(({ isTeamLicence, country, ...row }) => ({
+    ...row,
+    purchaseKind: (isTeamLicence ? "team-licence" : "individual") as PurchaseKind,
+    refundAmount: getRefundAmount(
+      { amountPaid: row.amountPaid, country, isTeamLicence: !!isTeamLicence },
+      row.course
+    ),
+    // A Team Licence buyer's own viewing says nothing about whether the team
+    // used it (ADR 0002). Otherwise these are live numbers, not a snapshot
+    // from when the request was raised (ADR 0003).
+    progress: isTeamLicence ? null : getProgress(row.buyer.id, row.course.id),
+  }));
 }
 
 /** The learner's Watched Time and lessons completed on the course, right now. */
@@ -134,12 +124,14 @@ function whyNotOpen(refundId: number) {
 
 export type ApproveResult =
   | { ok: true; refundRequest: typeof refunds.$inferSelect }
-  | { ok: false; reason: "not-found" | "already-resolved" | "team-licence" };
+  | { ok: false; reason: "not-found" | "already-resolved" };
 
 /**
- * Approve an Open Refund Request on an Individual Purchase: a Refund is due,
- * for the Amount Refunded the Platform Admin entered, and the learner's
- * Enrollment ends (ADR 0003). Approved is final.
+ * Approve an Open Refund Request: a Refund is due, for the Amount Refunded the
+ * Platform Admin entered, and the Purchase becomes a Refunded Purchase.
+ * Approved is final. On an Individual Purchase the learner's Enrollment ends
+ * (ADR 0003). On a Team Licence no Enrollment ends: its Seats were held while
+ * the request was Open, so none is claimed, and now none can be (ADR 0002).
  */
 export function approveRefundRequest(
   refundId: number,
@@ -165,9 +157,6 @@ export function approveRefundRequest(
     if (purchase.status !== RefundStatus.Open) {
       return { ok: false, reason: "already-resolved" };
     }
-    // Approving a Team Licence also voids its Seats, which arrives in #13.
-    if (isTeamLicence(purchase.id)) return { ok: false, reason: "team-licence" };
-
     // Only the payment service sets a Payment Transfer Status, so it stays null.
     const refundRequest = tx
       .update(refunds)
@@ -188,7 +177,10 @@ export function approveRefundRequest(
     // An Enrollment doesn't record its Purchase, so it is found by learner and
     // course alone, and left alone if their team paid for a place too
     // (ADR 0004). Progress is kept (ADR 0001).
-    if (!holdsClaimedSeat(purchase.userId, purchase.courseId)) {
+    if (
+      !isTeamLicence(purchase.id) &&
+      !holdsClaimedSeat(purchase.userId, purchase.courseId)
+    ) {
       tx.delete(enrollments)
         .where(
           and(

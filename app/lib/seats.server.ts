@@ -5,7 +5,11 @@ import { db } from "~/db";
 import { RefundStatus, coupons, enrollments, purchases } from "~/db/schema";
 import { hasRefundRequest } from "./refund-eligibility.server";
 
-export type SeatState = "available" | "held" | "claimed";
+/**
+ * Available, Held or Claimed while the Team Licence is not refunded;
+ * "refunded" once it is, and then it can never be claimed (ADR 0002).
+ */
+export type SeatState = "available" | "held" | "claimed" | "refunded";
 
 type Seat = Pick<
   typeof coupons.$inferSelect,
@@ -13,23 +17,14 @@ type Seat = Pick<
 >;
 
 /**
- * Whether the Seat is Available, Held or Claimed: the one place that decides,
- * because "nobody has claimed it" does not mean it can be claimed (ADR 0002).
+ * The Seat's state: the one place that decides, because "nobody has claimed
+ * it" does not mean it can be claimed (ADR 0002).
  */
 export function getSeatState(seat: Seat): SeatState {
   if (seat.redeemedByUserId !== null) return "claimed";
+  if (hasRefundRequest(seat.purchaseId, RefundStatus.Approved)) return "refunded";
   if (hasRefundRequest(seat.purchaseId, RefundStatus.Open)) return "held";
   return "available";
-}
-
-/** Whether the Purchase is a Team Licence: one that bought Seats. */
-export function isTeamLicence(purchaseId: number) {
-  const seat = db
-    .select({ id: coupons.id })
-    .from(coupons)
-    .where(eq(coupons.purchaseId, purchaseId))
-    .get();
-  return seat !== undefined;
 }
 
 /** Whether the learner holds a Claimed Seat on the course, from any Team Licence. */
@@ -66,6 +61,13 @@ export function claimSeat(
   const state = getSeatState(seat);
   if (state === "claimed") {
     return { ok: false, error: "Coupon has already been redeemed" };
+  }
+  if (state === "refunded") {
+    return {
+      ok: false,
+      error:
+        "This seat can no longer be claimed, because its Team Licence has been refunded.",
+    };
   }
   if (state === "held") {
     return {

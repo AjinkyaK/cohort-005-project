@@ -54,6 +54,7 @@ interface CourseStats {
   totalSeats: number;
   claimedSeats: number;
   heldSeats: number;
+  refundedSeats: number;
 }
 
 interface CouponRow {
@@ -103,6 +104,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       total: number;
       claimed: number;
       held: number;
+      refunded: number;
     }
   >();
 
@@ -116,12 +118,14 @@ export async function loader({ request }: Route.LoaderArgs) {
         total: 0,
         claimed: 0,
         held: 0,
+        refunded: 0,
       });
     }
     const entry = courseMap.get(coupon.courseId)!;
     entry.total++;
     if (coupon.state === "claimed") entry.claimed++;
     if (coupon.state === "held") entry.held++;
+    if (coupon.state === "refunded") entry.refunded++;
   }
 
   const courseStats: CourseStats[] = Array.from(courseMap.values()).map(
@@ -132,6 +136,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       totalSeats: e.total,
       claimedSeats: e.claimed,
       heldSeats: e.held,
+      refundedSeats: e.refunded,
     })
   );
 
@@ -244,6 +249,11 @@ export default function Team({ loaderData }: Route.ComponentProps) {
                         {stat.heldSeats} on hold while a Refund Request is open
                       </p>
                     )}
+                    {stat.refundedSeats > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        {stat.refundedSeats} refunded, can no longer be claimed
+                      </p>
+                    )}
                   </div>
                   <Link to={`/courses/${stat.courseSlug}/purchase?mode=team`}>
                     <Button variant="outline" size="sm">
@@ -309,6 +319,10 @@ export default function Team({ loaderData }: Route.ComponentProps) {
                       {coupon.state === "claimed" ? (
                         <span className="text-muted-foreground">
                           Claimed by {coupon.redeemedByEmail ?? "unknown user"}
+                        </span>
+                      ) : coupon.state === "refunded" ? (
+                        <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                          Refunded
                         </span>
                       ) : coupon.state === "held" ? (
                         <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
