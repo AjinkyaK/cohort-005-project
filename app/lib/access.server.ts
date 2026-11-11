@@ -200,3 +200,18 @@ export async function requireInstructorOrAdmin(request: Request) {
 
   return { userId, user, isAdmin: user.role === UserRole.Admin };
 }
+
+/**
+ * Throws 401 when signed out, 403 unless the user is a Platform Admin. Use in
+ * both the loader and the action of every admin page.
+ */
+export async function requirePlatformAdmin(request: Request) {
+  const userId = await requireUserId(request);
+  const user = getUserById(userId);
+
+  if (!user || user.role !== UserRole.Admin) {
+    throw data("Only Platform Admins can access this page.", { status: 403 });
+  }
+
+  return { userId, user };
+}

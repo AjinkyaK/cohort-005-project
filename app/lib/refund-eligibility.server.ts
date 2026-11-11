@@ -35,7 +35,7 @@ function hasRefundRequest(purchaseId: number, status: RefundStatus) {
  * Watched Time, in seconds: the furthest point reached in each lesson, added
  * up across the given lessons. Skipping ahead counts as watching.
  */
-function getWatchedSeconds(userId: number, lessonIds: number[]) {
+export function getWatchedSeconds(userId: number, lessonIds: number[]) {
   if (lessonIds.length === 0) return 0;
 
   const furthestPerLesson = db
@@ -67,7 +67,7 @@ function hasClaimedSeat(purchaseId: number) {
   return seat !== undefined;
 }
 
-function getCompletedLessonCount(userId: number, lessonIds: number[]) {
+export function getCompletedLessonCount(userId: number, lessonIds: number[]) {
   if (lessonIds.length === 0) return 0;
 
   const result = db
@@ -84,7 +84,7 @@ function getCompletedLessonCount(userId: number, lessonIds: number[]) {
   return result?.count ?? 0;
 }
 
-function getLessonIdsForCourse(courseId: number): number[] {
+export function getLessonIdsForCourse(courseId: number): number[] {
   return db
     .select({ id: lessons.id })
     .from(lessons)
