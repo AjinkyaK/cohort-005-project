@@ -6,6 +6,7 @@ import { LessonProgressStatus, RefundStatus, UserRole } from "~/db/schema";
 import {
   approveRefundRequest,
   checkRefundRequest,
+  claimSeat,
   declineRefundRequest,
   getRefundOffer,
   getSeatAvailability,
@@ -112,7 +113,7 @@ function buySeats(userId: number, seats: number, daysAgo = 3) {
   return { purchase, seats: seatRows };
 }
 
-function claimSeat(seatId: number, userId: number) {
+function markSeatClaimed(seatId: number, userId: number) {
   db.update(schema.coupons)
     .set({ redeemedByUserId: userId, redeemedAt: daysBefore(1) })
     .where(eq(schema.coupons.id, seatId))
@@ -228,7 +229,7 @@ describe("raising a Refund Request", () => {
   it("refuses a Team Licence with a Claimed Seat", () => {
     const teamAdmin = addLearner("Priya");
     const { purchase, seats } = buySeats(teamAdmin.id, 3);
-    claimSeat(seats[0].id, addLearner("Ben").id);
+    markSeatClaimed(seats[0].id, addLearner("Ben").id);
 
     expect(checkRefundRequest(db, purchase.id, teamAdmin.id, NOW)).toMatchObject({
       ok: false,
@@ -297,7 +298,7 @@ describe("approving a Refund Request", () => {
     const priya = addLearner("Priya");
     const { seats } = buySeats(priya.id, 2);
     // Liam claims a Seat first, so his Enrollment came from it.
-    claimSeat(seats[0].id, base.user.id);
+    markSeatClaimed(seats[0].id, base.user.id);
     const purchase = db
       .insert(schema.purchases)
       .values({
@@ -333,7 +334,7 @@ describe("approving a Refund Request", () => {
     const { purchase, seats } = buySeats(priya.id, 2);
     const id = raise(purchase.id, priya.id);
     // Seats are on hold while Open, but older data can still hold a claim.
-    claimSeat(seats[0].id, addLearner("Ben").id);
+    markSeatClaimed(seats[0].id, addLearner("Ben").id);
 
     expect(approveRefundRequest(db, id, platformAdmin.id, null, NOW)).toMatchObject({
       ok: false,
@@ -494,11 +495,110 @@ describe("listing Refund Requests", () => {
     const priya = addLearner("Priya");
     buySeats(priya.id, 2);
     const { seats } = buySeats(priya.id, 2);
-    claimSeat(seats[0].id, addLearner("Ben").id);
+    markSeatClaimed(seats[0].id, addLearner("Ben").id);
 
     expect(listTeamLicences(db, priya.id, NOW)).toMatchObject([
       { seatCount: 2, claimedSeatCount: 1, canRequestRefund: false },
       { seatCount: 2, claimedSeatCount: 0, canRequestRefund: true },
     ]);
+  });
+});
+
+describe("claiming a Seat", () => {
+  it("makes the Seat a Claimed Seat and enrols the Student", () => {
+    const priya = addLearner("Priya");
+    const ben = addLearner("Ben");
+    const { seats } = buySeats(priya.id, 2);
+
+    const result = claimSeat(db, seats[0].code, ben.id, "", NOW);
+
+    if (!result.ok) throw new Error(result.error);
+    expect(result.enrollment).toMatchObject({
+      userId: ben.id,
+      courseId: base.course.id,
+    });
+    expect(getSeat(seats[0].id)).toMatchObject({
+      redeemedByUserId: ben.id,
+      redeemedAt: NOW.toISOString(),
+    });
+    expect(getSeatAvailability(db, getSeat(seats[0].id))).toBe("claimed");
+    expect(isEnrolled(ben.id)).toBe(true);
+  });
+
+  it("refuses a code that isn't a Seat", () => {
+    expect(claimSeat(db, "NO-SUCH-SEAT", base.user.id, "", NOW)).toEqual({
+      ok: false,
+      error: "Coupon not found",
+    });
+  });
+
+  it("refuses a Seat that is already claimed", () => {
+    const priya = addLearner("Priya");
+    const { seats } = buySeats(priya.id, 1);
+    markSeatClaimed(seats[0].id, addLearner("Ben").id);
+
+    expect(claimSeat(db, seats[0].code, base.user.id, "", NOW)).toEqual({
+      ok: false,
+      error: "Coupon has already been redeemed",
+    });
+    expect(isEnrolled(base.user.id)).toBe(false);
+  });
+
+  it("refuses a Seat on hold while its Team Licence has an Open Refund Request", () => {
+    const priya = addLearner("Priya");
+    const { purchase, seats } = buySeats(priya.id, 1);
+    raise(purchase.id, priya.id);
+
+    expect(claimSeat(db, seats[0].code, base.user.id, "", NOW)).toEqual({
+      ok: false,
+      error:
+        "This seat can't be claimed right now. Ask the person who shared it with you.",
+    });
+    expect(getSeatAvailability(db, getSeat(seats[0].id))).toBe("on_hold");
+    expect(isEnrolled(base.user.id)).toBe(false);
+  });
+
+  it("refuses a Seat whose Team Licence Refund Request was approved", () => {
+    const priya = addLearner("Priya");
+    const { purchase, seats } = buySeats(priya.id, 1);
+    approveRefundRequest(db, raise(purchase.id, priya.id), platformAdmin.id, null, NOW);
+
+    expect(claimSeat(db, seats[0].code, base.user.id, "", NOW)).toEqual({
+      ok: false,
+      error:
+        "This seat is no longer available. Ask the person who shared it with you.",
+    });
+    expect(isEnrolled(base.user.id)).toBe(false);
+  });
+
+  it("refuses a Student already enrolled in the course", () => {
+    const priya = addLearner("Priya");
+    const { seats } = buySeats(priya.id, 1);
+    buyForSelf(base.user.id);
+
+    expect(claimSeat(db, seats[0].code, base.user.id, "", NOW)).toEqual({
+      ok: false,
+      error: "You are already enrolled in this course",
+    });
+    expect(getSeatAvailability(db, getSeat(seats[0].id))).toBe("available");
+  });
+
+  it("refuses a Student in a different country from the buyer, saving nothing", () => {
+    const priya = addLearner("Priya");
+    const { purchase, seats } = buySeats(priya.id, 1);
+    db.update(schema.purchases)
+      .set({ country: "IN" })
+      .where(eq(schema.purchases.id, purchase.id))
+      .run();
+
+    expect(claimSeat(db, seats[0].code, base.user.id, "US", NOW)).toEqual({
+      ok: false,
+      error:
+        "This coupon can only be redeemed from the same country as the purchaser",
+    });
+    expect(getSeatAvailability(db, getSeat(seats[0].id))).toBe("available");
+    expect(isEnrolled(base.user.id)).toBe(false);
+
+    expect(claimSeat(db, seats[0].code, base.user.id, "IN", NOW).ok).toBe(true);
   });
 });
