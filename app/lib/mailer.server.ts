@@ -59,7 +59,7 @@ export function outboxTransport(directory: string): MailTransport {
   };
 }
 
-function defaultTransport(): MailTransport {
+export function defaultTransport(): MailTransport {
   const token = process.env.POSTMARK_SERVER_TOKEN;
   return token ? postmarkTransport(token) : outboxTransport(".outbox");
 }

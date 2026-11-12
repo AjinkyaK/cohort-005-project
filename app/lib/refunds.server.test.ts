@@ -368,6 +368,67 @@ describe("approving a Refund Request", () => {
     expect(result.email.subject).toBe("Refund approved — Test Course");
     expect(result.email.body).toContain("$79.00");
   });
+
+  it("tells the buyer, from the deciding Platform Admin, with the whole note and a link to their settings", () => {
+    const purchase = buyForSelf(base.user.id);
+    const id = raise(purchase.id, base.user.id);
+    const note = "Approved. ".repeat(200).trim();
+
+    const result = approveRefundRequest(db, id, platformAdmin.id, note, NOW);
+
+    if (!result.ok) throw new Error(result.error);
+    expect(result.refundDecided).toEqual({
+      recipient: {
+        id: String(base.user.id),
+        name: "Test User",
+        email: "test@example.com",
+      },
+      actor: {
+        id: String(platformAdmin.id),
+        name: "Pat Admin",
+        email: "pat@example.com",
+      },
+      data: {
+        decision: "approved",
+        course_title: "Test Course",
+        note,
+        amount: "$79.00",
+        purchase_kind: "individual_purchase",
+        url: "/settings",
+      },
+    });
+  });
+
+  it("tells a Team Admin their Unclaimed Seats can no longer be claimed, linking to the team page", () => {
+    const priya = addLearner("Priya");
+    const { purchase } = buySeats(priya.id, 2);
+    const id = raise(purchase.id, priya.id);
+
+    const result = approveRefundRequest(db, id, platformAdmin.id, null, NOW);
+
+    if (!result.ok) throw new Error(result.error);
+    expect(result.refundDecided.recipient.id).toBe(String(priya.id));
+    expect(result.refundDecided.data).toMatchObject({
+      decision: "approved",
+      note: null,
+      amount: "$158.00",
+      purchase_kind: "team_licence",
+      url: "/team",
+    });
+    expect(result.email.body).toContain(
+      "Its Unclaimed Seats can no longer be claimed."
+    );
+  });
+
+  it("does not mention Seats when approving an Individual Purchase", () => {
+    const purchase = buyForSelf(base.user.id);
+    const id = raise(purchase.id, base.user.id);
+
+    const result = approveRefundRequest(db, id, platformAdmin.id, null, NOW);
+
+    if (!result.ok) throw new Error(result.error);
+    expect(result.email.body).not.toContain("Seats");
+  });
 });
 
 describe("declining a Refund Request", () => {
@@ -408,6 +469,43 @@ describe("declining a Refund Request", () => {
     declineRefundRequest(db, id, platformAdmin.id, "Seats are in use.", NOW);
 
     expect(getSeatAvailability(db, getSeat(seats[0].id))).toBe("available");
+  });
+
+  it("tells the buyer it was declined, with the whole note", () => {
+    const priya = addLearner("Priya");
+    const { purchase } = buySeats(priya.id, 1);
+    const id = raise(purchase.id, priya.id);
+
+    const result = declineRefundRequest(
+      db,
+      id,
+      platformAdmin.id,
+      "  Seats are in use.  ",
+      NOW
+    );
+
+    if (!result.ok) throw new Error(result.error);
+    expect(result.refundDecided).toEqual({
+      recipient: {
+        id: String(priya.id),
+        name: "Priya",
+        email: "priya@example.com",
+      },
+      actor: {
+        id: String(platformAdmin.id),
+        name: "Pat Admin",
+        email: "pat@example.com",
+      },
+      data: {
+        decision: "declined",
+        course_title: "Test Course",
+        note: "Seats are in use.",
+        amount: "$79.00",
+        purchase_kind: "team_licence",
+        url: "/team",
+      },
+    });
+    expect(result.email.body).not.toContain("Unclaimed Seats");
   });
 });
 
