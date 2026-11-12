@@ -121,6 +121,85 @@ export function getSeatAvailability(
   return "available";
 }
 
+export const SEAT_ON_HOLD =
+  "This seat can't be claimed right now. Ask the person who shared it with you.";
+export const SEAT_REFUNDED =
+  "This seat is no longer available. Ask the person who shared it with you.";
+
+export type ClaimSeatResult =
+  | { ok: true; enrollment: typeof enrollments.$inferSelect }
+  | { ok: false; error: string };
+
+/**
+ * A Student claims a Seat by its code: the Seat becomes a Claimed Seat and the
+ * Student is enrolled, both in one transaction. Refused, saving nothing, if the
+ * Seat doesn't exist, is already claimed, isn't available (on hold or
+ * refunded), the Student is already enrolled, or the Student is in a different
+ * country from the Team Licence's buyer.
+ */
+export function claimSeat(
+  db: Db,
+  code: string,
+  studentId: number,
+  studentCountry: string,
+  now: Date
+): ClaimSeatResult {
+  return db.transaction((tx): ClaimSeatResult => {
+    const seat = tx.select().from(coupons).where(eq(coupons.code, code)).get();
+    if (!seat) {
+      return { ok: false, error: "Coupon not found" };
+    }
+
+    if (seat.redeemedByUserId !== null) {
+      return { ok: false, error: "Coupon has already been redeemed" };
+    }
+
+    const availability = getSeatAvailability(tx, seat);
+    if (availability === "on_hold") {
+      return { ok: false, error: SEAT_ON_HOLD };
+    }
+    if (availability === "refunded") {
+      return { ok: false, error: SEAT_REFUNDED };
+    }
+
+    const existingEnrollment = tx
+      .select()
+      .from(enrollments)
+      .where(
+        and(
+          eq(enrollments.userId, studentId),
+          eq(enrollments.courseId, seat.courseId)
+        )
+      )
+      .get();
+    if (existingEnrollment) {
+      return { ok: false, error: "You are already enrolled in this course" };
+    }
+
+    const purchase = getPurchase(tx, seat.purchaseId);
+    if (purchase?.country && purchase.country !== studentCountry) {
+      return {
+        ok: false,
+        error:
+          "This coupon can only be redeemed from the same country as the purchaser",
+      };
+    }
+
+    tx.update(coupons)
+      .set({ redeemedByUserId: studentId, redeemedAt: now.toISOString() })
+      .where(eq(coupons.id, seat.id))
+      .run();
+
+    const enrollment = tx
+      .insert(enrollments)
+      .values({ userId: studentId, courseId: seat.courseId })
+      .returning()
+      .get();
+
+    return { ok: true, enrollment };
+  });
+}
+
 // ─── Figures and rules ───
 
 function getLessonIds(db: Queryable, courseId: number): number[] {
