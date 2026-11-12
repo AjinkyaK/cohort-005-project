@@ -18,6 +18,7 @@ import {
   UserRole,
 } from "~/db/schema";
 import { formatPrice } from "~/lib/utils";
+import type { Email } from "~/lib/mailer.server";
 import type {
   RefundDecided,
   RefundRaised,
@@ -102,7 +103,6 @@ function isClaimed(seat: Seat) {
 
 // There is no column saying which kind a Purchase is: a Team Licence is the
 // Purchase that granted Seats, and every Team Licence grants at least one.
-export type { PurchaseKind };
 
 function kindOf(seats: Seat[]): PurchaseKind {
   return seats.length > 0 ? "team_licence" : "individual_purchase";
@@ -481,8 +481,6 @@ export function getRefundOffer(
     lastDayInWindow: lastDayOfWindow(individualPurchase.createdAt),
   };
 }
-
-export type Email = { to: string; subject: string; body: string };
 
 export type RaiseResult =
   | {

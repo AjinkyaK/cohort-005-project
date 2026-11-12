@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { z } from "zod";
 import {
   KnockFeedProvider,
   KnockProvider,
@@ -18,19 +19,12 @@ export type NotificationBellProps = {
 async function refreshUserToken(): Promise<string | void> {
   const response = await fetch("/api/knock-token");
   if (!response.ok) return;
-  const body: unknown = await response.json();
-  if (!hasUserToken(body)) return;
-  return body.userToken;
+  const parsed = TokenResponse.safeParse(await response.json());
+  if (!parsed.success) return;
+  return parsed.data.userToken;
 }
 
-function hasUserToken(body: unknown): body is { userToken: string } {
-  return (
-    typeof body === "object" &&
-    body !== null &&
-    "userToken" in body &&
-    typeof body.userToken === "string"
-  );
-}
+const TokenResponse = z.object({ userToken: z.string() });
 
 /**
  * The signed-in person's in-app feed: Knock's stock bell and popover, live

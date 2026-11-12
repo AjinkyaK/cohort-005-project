@@ -128,6 +128,27 @@ export function defaultChannels(): Channels {
   };
 }
 
+/**
+ * The Channels a notify<Event>() was given, or the real ones. Building the real
+ * ones can throw; that is logged and the Notification skipped, never thrown.
+ */
+function channelsOr<T>(
+  event: string,
+  given: T | undefined,
+  build: () => T
+): T | null {
+  if (given) return given;
+  try {
+    return build();
+  } catch (error) {
+    console.error(
+      `[notifications] ${event}: the Channels could not be built`,
+      error
+    );
+    return null;
+  }
+}
+
 async function deliver(
   event: string,
   sends: Record<string, () => Promise<void>>
@@ -185,8 +206,11 @@ export const REFUND_DECIDED_WORKFLOW = "refund-request-decided";
 /** Tells the buyer their Refund Request was decided: in-app feed and email. */
 export async function notifyRefundDecided(
   { refundDecided, email }: { refundDecided: RefundDecided; email: Email },
-  { feed, mail }: Channels = defaultChannels()
+  given?: Channels
 ): Promise<void> {
+  const channels = channelsOr("Refund Request decided", given, defaultChannels);
+  if (!channels) return;
+  const { feed, mail } = channels;
 
   await deliver("Refund Request decided", {
     feed: () =>
@@ -235,8 +259,11 @@ export const SEAT_CLAIMED_WORKFLOW = "seat-claimed";
  */
 export async function notifySeatClaimed(
   seatClaimed: SeatClaimed,
-  feed: FeedTransport = defaultChannels().feed
+  given?: FeedTransport
 ): Promise<void> {
+  const feed = channelsOr("Seat claimed", given, () => defaultChannels().feed);
+  if (!feed) return;
+
   await deliver("Seat claimed", {
     feed: () =>
       feed.trigger(SEAT_CLAIMED_WORKFLOW, {
@@ -284,8 +311,12 @@ export const REFUND_RAISED_WORKFLOW = "refund-request-raised";
 /** Tells every Platform Admin a Refund Request was raised: in-app feed and email. */
 export async function notifyRefundRaised(
   refundRaised: RefundRaised,
-  { feed, mail }: Channels = defaultChannels()
+  given?: Channels
 ): Promise<void> {
+  const channels = channelsOr("Refund Request raised", given, defaultChannels);
+  if (!channels) return;
+  const { feed, mail } = channels;
+
   await deliver("Refund Request raised", {
     feed: () =>
       feed.trigger(REFUND_RAISED_WORKFLOW, {

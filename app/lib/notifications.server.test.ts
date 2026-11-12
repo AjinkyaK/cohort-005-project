@@ -321,7 +321,8 @@ describe("knockFeedSession", () => {
 
   it("signs the User Token with RS256 for that person, valid for one hour", async () => {
     const session = await knockFeedSession(7, config);
-    const { header, payload, validSignature } = decode(session!.userToken);
+    if (!session) throw new Error("expected a feed session");
+    const { header, payload, validSignature } = decode(session.userToken);
 
     expect(validSignature).toBe(true);
     expect(header.alg).toBe("RS256");
