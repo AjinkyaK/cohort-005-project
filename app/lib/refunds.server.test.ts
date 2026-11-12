@@ -238,6 +238,106 @@ describe("raising a Refund Request", () => {
   });
 });
 
+describe("telling Platform Admins a Refund Request was raised", () => {
+  it("tells every Platform Admin, from the buyer, with the whole reason", () => {
+    const secondAdmin = db
+      .insert(schema.users)
+      .values({ name: "Sam Admin", email: "sam@example.com", role: UserRole.Admin })
+      .returning()
+      .get();
+    const purchase = buyForSelf(base.user.id);
+    const reason = "It was not what I expected. ".repeat(30).trim();
+
+    const result = raiseRefundRequest(db, purchase.id, base.user.id, reason, NOW);
+    if (!result.ok) throw new Error(result.error);
+
+    expect(result.refundRaised.recipients).toEqual([
+      { id: String(platformAdmin.id), name: "Pat Admin", email: "pat@example.com" },
+      { id: String(secondAdmin.id), name: "Sam Admin", email: "sam@example.com" },
+    ]);
+    expect(result.refundRaised.actor).toEqual({
+      id: String(base.user.id),
+      name: "Test User",
+      email: "test@example.com",
+    });
+    expect(result.refundRaised.data).toEqual({
+      buyer_name: "Test User",
+      course_title: "Test Course",
+      amount: "$79.00",
+      reason,
+      url: "/admin/refunds",
+    });
+  });
+
+  it("tells a Platform Admin who raised it on their own Purchase too", () => {
+    const purchase = buyForSelf(platformAdmin.id);
+
+    const result = raiseRefundRequest(db, purchase.id, platformAdmin.id, "Bought it twice.", NOW);
+    if (!result.ok) throw new Error(result.error);
+
+    expect(result.refundRaised.recipients.map((r) => r.id)).toEqual([
+      String(platformAdmin.id),
+    ]);
+    expect(result.refundRaised.actor.id).toBe(String(platformAdmin.id));
+  });
+
+  it("emails each Platform Admin about an Individual Purchase", () => {
+    const purchase = buyForSelf(base.user.id);
+
+    const result = raiseRefundRequest(db, purchase.id, base.user.id, "Not for me.", NOW);
+    if (!result.ok) throw new Error(result.error);
+
+    expect(result.refundRaised.emails).toEqual([
+      {
+        to: "pat@example.com",
+        subject: "New refund request — Test Course",
+        body: [
+          'Test User has asked for a refund on "Test Course" (Individual Purchase, $79.00).',
+          "",
+          "Their reason:",
+          "Not for me.",
+          "",
+          "Decide it under Admin → Refund Requests.",
+        ].join("\n"),
+      },
+    ]);
+  });
+
+  it("emails the Seat count for a Team Licence", () => {
+    const teamAdmin = addLearner("Priya");
+    const { purchase } = buySeats(teamAdmin.id, 3);
+
+    const result = raiseRefundRequest(db, purchase.id, teamAdmin.id, "Team changed plans.", NOW);
+    if (!result.ok) throw new Error(result.error);
+
+    expect(result.refundRaised.emails[0].body).toContain(
+      'Priya has asked for a refund on "Test Course" (Team Licence of 3 Seats, $237.00).'
+    );
+  });
+
+  it("leaves the buyer's acknowledgement email as it was", () => {
+    const purchase = buyForSelf(base.user.id);
+
+    const result = raiseRefundRequest(db, purchase.id, base.user.id, "Not for me.", NOW);
+    if (!result.ok) throw new Error(result.error);
+
+    expect(result.email).toEqual({
+      to: "test@example.com",
+      subject: "Refund requested — Test Course",
+      body: [
+        "Hi Test User,",
+        "",
+        'We have your refund request for "Test Course".',
+        "The refund is for $79.00, the amount you paid.",
+        "",
+        "Our team reviews every refund request by hand. You do not need to do anything else — we will email you again when it is done.",
+        "",
+        "— The Cadence team",
+      ].join("\n"),
+    });
+  });
+});
+
 describe("the refund offer on the course page", () => {
   it("offers the newest Individual Purchase, not a newer Team Licence", () => {
     const individual = buyForSelf(base.user.id, 3);
