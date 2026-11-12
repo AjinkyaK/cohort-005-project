@@ -98,3 +98,7 @@ _Avoid_: Watch cap, Viewing threshold
 **Notification**:
 A message telling one Student, Instructor, Team Admin or Platform Admin that something on Cadence concerning them has happened. The same Notification may reach them in the app, by email, or both.
 _Avoid_: Alert, User notification
+
+**Channel**:
+One route a Notification takes to reach its recipient: the in-app feed or email. A Notification goes out on one Channel or several.
+_Avoid_: Half
