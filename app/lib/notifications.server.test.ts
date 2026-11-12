@@ -3,9 +3,11 @@ import type { Email, MailTransport } from "~/lib/mailer.server";
 import {
   knockConfig,
   notifyRefundDecided,
+  notifyRefundRaised,
   notifySeatClaimed,
   type FeedTransport,
   type RefundDecided,
+  type RefundRaised,
   type SeatClaimed,
 } from "./notifications.server";
 
@@ -123,6 +125,86 @@ describe("notifyRefundDecided", () => {
 
     await expect(
       notifyRefundDecided({ refundDecided, email }, { feed, mail: failingMail() })
+    ).resolves.toBeUndefined();
+
+    expect(triggers).toHaveLength(1);
+  });
+});
+
+const refundRaised: RefundRaised = {
+  recipients: [
+    { id: "2", name: "Pat Admin", email: "pat@example.com" },
+    { id: "3", name: "Sam Admin", email: "sam@example.com" },
+  ],
+  actor: { id: "7", name: "Priya", email: "priya@example.com" },
+  data: {
+    buyer_name: "Priya",
+    course_title: "Test Course",
+    amount: "$79.00",
+    reason: "It was not what I expected.",
+    url: "/admin/refunds",
+  },
+  emails: [
+    { to: "pat@example.com", subject: "New refund request — Test Course", body: "Priya has asked..." },
+    { to: "sam@example.com", subject: "New refund request — Test Course", body: "Priya has asked..." },
+  ],
+};
+
+describe("notifyRefundRaised", () => {
+  it("puts the Refund Request in every Platform Admin's feed, from the buyer", async () => {
+    const { feed, triggers } = recordingFeed();
+    const { mail } = recordingMail();
+
+    await notifyRefundRaised(refundRaised, { feed, mail });
+
+    expect(triggers).toEqual([
+      {
+        workflow: "refund-request-raised",
+        args: {
+          recipients: [
+            { id: "2", name: "Pat Admin", email: "pat@example.com" },
+            { id: "3", name: "Sam Admin", email: "sam@example.com" },
+          ],
+          actor: { id: "7", name: "Priya", email: "priya@example.com" },
+          data: {
+            buyer_name: "Priya",
+            course_title: "Test Course",
+            amount: "$79.00",
+            reason: "It was not what I expected.",
+            url: "/admin/refunds",
+          },
+        },
+      },
+    ]);
+  });
+
+  it("emails each Platform Admin their own email", async () => {
+    const { feed } = recordingFeed();
+    const { mail, sent } = recordingMail();
+
+    await notifyRefundRaised(refundRaised, { feed, mail });
+
+    expect(sent.map((email) => email.to)).toEqual([
+      "pat@example.com",
+      "sam@example.com",
+    ]);
+  });
+
+  it("still emails the Platform Admins when the feed fails", async () => {
+    const { mail, sent } = recordingMail();
+
+    await expect(
+      notifyRefundRaised(refundRaised, { feed: failingFeed(), mail })
+    ).resolves.toBeUndefined();
+
+    expect(sent).toHaveLength(2);
+  });
+
+  it("still fills the feed when the email fails", async () => {
+    const { feed, triggers } = recordingFeed();
+
+    await expect(
+      notifyRefundRaised(refundRaised, { feed, mail: failingMail() })
     ).resolves.toBeUndefined();
 
     expect(triggers).toHaveLength(1);

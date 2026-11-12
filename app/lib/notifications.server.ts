@@ -207,3 +207,55 @@ export async function notifySeatClaimed(
       }),
   });
 }
+
+// ─── Refund Request raised ───
+
+/**
+ * Feed data for the Knock workflow `refund-request-raised`. Its template is
+ * edited by hand in the Knock dashboard (Development) and reads these
+ * top-level fields:
+ *
+ * - `buyer_name`
+ * - `course_title`
+ * - `amount`: the amount paid, formatted (e.g. "$79.00")
+ * - `reason`: the buyer's whole reason. Never truncated.
+ * - `url`: `/admin/refunds`
+ */
+export type RefundRaisedData = {
+  buyer_name: string;
+  course_title: string;
+  amount: string;
+  reason: string;
+  url: "/admin/refunds";
+};
+
+/**
+ * Every Platform Admin at the moment it was raised is told, each with their
+ * own email; the buyer is the actor.
+ */
+export type RefundRaised = {
+  recipients: Recipient[];
+  actor: Recipient;
+  data: RefundRaisedData;
+  emails: Email[];
+};
+
+export const REFUND_RAISED_WORKFLOW = "refund-request-raised";
+
+/** Tells every Platform Admin a Refund Request was raised: in-app feed and email. */
+export async function notifyRefundRaised(
+  refundRaised: RefundRaised,
+  { feed, mail }: Channels = defaultChannels()
+): Promise<void> {
+  await deliver("Refund Request raised", {
+    feed: () =>
+      feed.trigger(REFUND_RAISED_WORKFLOW, {
+        recipients: refundRaised.recipients,
+        actor: refundRaised.actor,
+        data: refundRaised.data,
+      }),
+    email: async () => {
+      await Promise.all(refundRaised.emails.map((email) => mail.send(email)));
+    },
+  });
+}
