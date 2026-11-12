@@ -17,6 +17,7 @@ import {
   RefundStatus,
 } from "~/db/schema";
 import { formatPrice } from "~/lib/utils";
+import type { RefundDecided, Recipient } from "~/lib/notifications.server";
 import {
   REFUND_COMPLETION_LIMIT,
   REFUND_WATCH_LIMIT_SECONDS,
@@ -568,7 +569,9 @@ export function listTeamLicences(db: Queryable, buyerId: number, now: Date) {
 
 // ─── Deciding a Refund Request ───
 
-export type DecisionResult = { ok: true; email: Email } | Failure;
+export type DecisionResult =
+  | { ok: true; email: Email; refundDecided: RefundDecided }
+  | Failure;
 
 function findOpenRefundRequest(
   tx: Queryable,
@@ -679,7 +682,13 @@ export function approveRefundRequest(
 
     return {
       ok: true,
-      email: buildDecisionEmail(tx, purchase, RefundStatus.Approved, note),
+      ...buildDecision(
+        tx,
+        purchase,
+        platformAdminId,
+        RefundStatus.Approved,
+        note
+      ),
     };
   });
 }
@@ -722,9 +731,10 @@ export function declineRefundRequest(
 
     return {
       ok: true,
-      email: buildDecisionEmail(
+      ...buildDecision(
         tx,
         found.purchase,
+        platformAdminId,
         RefundStatus.Declined,
         trimmedNote
       ),
@@ -732,26 +742,67 @@ export function declineRefundRequest(
   });
 }
 
-/** The email the buyer gets once their Refund Request is decided. */
-function buildDecisionEmail(
+function toRecipient(db: Queryable, userId: number): Recipient {
+  const person = db.select().from(users).where(eq(users.id, userId)).get();
+  return {
+    id: String(userId),
+    name: person?.name ?? "",
+    email: person?.email ?? "",
+  };
+}
+
+/**
+ * What the buyer is told once their Refund Request is decided: the decision
+ * email and the in-app Notification, read from the same snapshot as the
+ * decision.
+ */
+function buildDecision(
   db: Queryable,
   purchase: Purchase,
+  platformAdminId: number,
   decision: RefundStatus.Approved | RefundStatus.Declined,
   note: string | null
-): Email {
-  const buyer = db
-    .select()
-    .from(users)
-    .where(eq(users.id, purchase.userId))
-    .get();
+): { email: Email; refundDecided: RefundDecided } {
+  const buyer = toRecipient(db, purchase.userId);
   const course = db
     .select()
     .from(courses)
     .where(eq(courses.id, purchase.courseId))
     .get();
+  const kind = kindOf(getSeats(db, purchase.id));
 
-  const courseTitle = course?.title ?? "your course";
+  return {
+    email: buildDecisionEmail(buyer, course?.title, purchase, kind, decision, note),
+    refundDecided: {
+      recipient: buyer,
+      actor: toRecipient(db, platformAdminId),
+      data: {
+        decision,
+        course_title: course?.title ?? "",
+        note,
+        amount: formatPrice(purchase.amountPaid),
+        purchase_kind: kind,
+        url: kind === "team_licence" ? "/team" : "/settings",
+      },
+    },
+  };
+}
+
+/** The email the buyer gets once their Refund Request is decided. */
+function buildDecisionEmail(
+  buyer: Recipient,
+  title: string | undefined,
+  purchase: Purchase,
+  kind: PurchaseKind,
+  decision: RefundStatus.Approved | RefundStatus.Declined,
+  note: string | null
+): Email {
+  const courseTitle = title ?? "your course";
   const noteLines = note ? ["", note] : [];
+  const seatLines =
+    kind === "team_licence"
+      ? ["", "Its Unclaimed Seats can no longer be claimed."]
+      : [];
 
   const middle =
     decision === RefundStatus.Approved
@@ -759,6 +810,7 @@ function buildDecisionEmail(
           `We have approved your refund request for "${courseTitle}".`,
           `${formatPrice(purchase.amountPaid)}, the full amount you paid, is on its way back to you.`,
           ...noteLines,
+          ...seatLines,
         ]
       : [
           `We have looked at your refund request for "${courseTitle}" and decided not to refund it.`,
@@ -768,10 +820,10 @@ function buildDecisionEmail(
         ];
 
   return {
-    to: buyer?.email ?? "",
+    to: buyer.email,
     subject: `Refund ${decision} — ${courseTitle}`,
     body: [
-      `Hi ${buyer?.name ?? "there"},`,
+      `Hi ${buyer.name || "there"},`,
       "",
       ...middle,
       "",
