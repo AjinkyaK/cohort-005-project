@@ -1,4 +1,4 @@
-import { Knock } from "@knocklabs/node";
+import { Knock, signUserToken } from "@knocklabs/node";
 import {
   defaultTransport,
   type Email,
@@ -38,6 +38,43 @@ export function knockConfig(
   if (!apiKey || !publicApiKey || !signingKey || !feedChannelId) return null;
 
   return { apiKey, publicApiKey, signingKey, feedChannelId };
+}
+
+// ─── In-app feed session (browser) ───
+
+/** What the browser needs to read one person's feed from Knock, and nothing more. */
+export type KnockFeedSession = {
+  apiKey: string; // the Public API Key
+  feedChannelId: string;
+  userId: string;
+  userToken: string;
+};
+
+const USER_TOKEN_LIFETIME_SECONDS = 60 * 60;
+
+/**
+ * Signs an RS256 User Token (`sub` = String(users.id), 1 h expiry) for the
+ * signed-in person. Null when nobody is signed in or Knock isn't configured,
+ * in which case no bell is shown.
+ */
+export async function knockFeedSession(
+  personId: number | null,
+  config: KnockConfig | null = knockConfig()
+): Promise<KnockFeedSession | null> {
+  if (personId === null || !config) return null;
+
+  const userId = String(personId);
+  const userToken = await signUserToken(userId, {
+    signingKey: config.signingKey,
+    expiresInSeconds: USER_TOKEN_LIFETIME_SECONDS,
+  });
+
+  return {
+    apiKey: config.publicApiKey,
+    feedChannelId: config.feedChannelId,
+    userId,
+    userToken,
+  };
 }
 
 // ─── Channels ───
