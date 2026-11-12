@@ -4,7 +4,7 @@ import {
   type Email,
   type MailTransport,
 } from "~/lib/mailer.server";
-import type { PurchaseKind } from "~/lib/refunds.server";
+import type { PurchaseKind } from "~/lib/refund-rules";
 
 // ─── Notifications ───
 // Cadence tells the person each event concerns, as soon as the change is saved.
@@ -158,8 +158,9 @@ async function deliver(
  * - `course_title`
  * - `note`: the Platform Admin's whole decision note, or null. Never truncated.
  * - `amount`: the amount paid, formatted (e.g. "$79.00")
- * - `purchase_kind`: `individual_purchase` or `team_licence`. An approved
- *   Team Licence adds "Its Unclaimed Seats can no longer be claimed."
+ * - `purchase_kind`: `individual_purchase` or `team_licence`
+ * - `seats_note`: "Its Unclaimed Seats can no longer be claimed." for an
+ *   approved Team Licence, null otherwise. Show it whenever it is present.
  * - `url`: `/settings` (Individual Purchase) or `/team` (Team Licence)
  */
 export type RefundDecidedData = {
@@ -168,6 +169,7 @@ export type RefundDecidedData = {
   note: string | null;
   amount: string;
   purchase_kind: PurchaseKind;
+  seats_note: string | null;
   url: "/settings" | "/team";
 };
 

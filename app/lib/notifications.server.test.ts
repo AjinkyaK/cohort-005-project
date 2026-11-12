@@ -61,6 +61,7 @@ const refundDecided: RefundDecided = {
     note: "Seats are in use.",
     amount: "$79.00",
     purchase_kind: "team_licence",
+    seats_note: null,
     url: "/team",
   },
 };
@@ -97,6 +98,7 @@ describe("notifyRefundDecided", () => {
             note: "Seats are in use.",
             amount: "$79.00",
             purchase_kind: "team_licence",
+            seats_note: null,
             url: "/team",
           },
         },

@@ -18,8 +18,18 @@ export type NotificationBellProps = {
 async function refreshUserToken(): Promise<string | void> {
   const response = await fetch("/api/knock-token");
   if (!response.ok) return;
-  const { userToken } = (await response.json()) as { userToken: string };
-  return userToken;
+  const body: unknown = await response.json();
+  if (!hasUserToken(body)) return;
+  return body.userToken;
+}
+
+function hasUserToken(body: unknown): body is { userToken: string } {
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    "userToken" in body &&
+    typeof body.userToken === "string"
+  );
 }
 
 /**

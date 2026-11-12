@@ -6,6 +6,10 @@ export const REFUND_WINDOW_DAYS = 14;
 export const REFUND_WATCH_LIMIT_SECONDS = 60 * 60;
 export const REFUND_COMPLETION_LIMIT = 0.5;
 
+// Which kind a Purchase is. Kept here so notifications.server.ts can name it
+// without importing refunds.server.ts (which imports notifications.server.ts).
+export type PurchaseKind = "individual_purchase" | "team_licence";
+
 export type RuleBreak =
   | "window_closed"
   | "watched_too_much"

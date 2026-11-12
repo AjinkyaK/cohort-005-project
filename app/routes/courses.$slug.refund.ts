@@ -73,8 +73,13 @@ export async function action({ params, request }: Route.ActionArgs) {
     throw data(result.error, { status: result.status });
   }
 
-  await sendEmail(result.email);
-  await notifyRefundRaised(result.refundRaised);
+  // The Refund Request is saved, so Platform Admins are told even if the
+  // buyer's acknowledgement email fails.
+  try {
+    await sendEmail(result.email);
+  } finally {
+    await notifyRefundRaised(result.refundRaised);
+  }
 
   return redirect(result.kind === "team_licence" ? "/team" : "/settings");
 }

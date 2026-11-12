@@ -215,8 +215,18 @@ export async function loader({ request }: Route.LoaderArgs) {
     countryTierInfo,
     countries: COUNTRIES,
     isTeamAdmin: currentUserId ? isTeamAdmin(currentUserId) : false,
-    knock: await knockFeedSession(currentUser?.id ?? null),
+    knock: await signedKnockFeedSession(currentUser?.id ?? null),
   };
+}
+
+/** The bell's feed session, or no bell if signing fails: the page still loads. */
+async function signedKnockFeedSession(personId: number | null) {
+  try {
+    return await knockFeedSession(personId);
+  } catch (error) {
+    console.error("[notifications] could not sign the Knock User Token", error);
+    return null;
+  }
 }
 
 export default function AppLayout({ loaderData }: Route.ComponentProps) {

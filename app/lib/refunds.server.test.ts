@@ -494,6 +494,7 @@ describe("approving a Refund Request", () => {
         note,
         amount: "$79.00",
         purchase_kind: "individual_purchase",
+        seats_note: null,
         url: "/settings",
       },
     });
@@ -513,6 +514,7 @@ describe("approving a Refund Request", () => {
       note: null,
       amount: "$158.00",
       purchase_kind: "team_licence",
+      seats_note: "Its Unclaimed Seats can no longer be claimed.",
       url: "/team",
     });
     expect(result.email.body).toContain(
@@ -602,6 +604,7 @@ describe("declining a Refund Request", () => {
         note: "Seats are in use.",
         amount: "$79.00",
         purchase_kind: "team_licence",
+        seats_note: null,
         url: "/team",
       },
     });
