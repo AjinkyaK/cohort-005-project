@@ -159,3 +159,51 @@ export async function notifyRefundDecided(
     email: () => mail.send(email),
   });
 }
+
+// ─── Seat claimed ───
+
+/**
+ * Feed data for the Knock workflow `seat-claimed`. Its template is edited by
+ * hand in the Knock dashboard (Development) and reads these top-level fields:
+ *
+ * - `student_name`: the Student who claimed the Seat
+ * - `course_title`
+ * - `claimed`: how many of the Team Licence's Seats are claimed, just after
+ *   this claim
+ * - `total`: how many Seats the Team Licence has
+ * - `url`: `/team`
+ */
+export type SeatClaimedData = {
+  student_name: string;
+  course_title: string;
+  claimed: number;
+  total: number;
+  url: "/team";
+};
+
+/** The Team Admin (the Team Licence's buyer) is told; the Student is the actor. */
+export type SeatClaimed = {
+  recipient: Recipient;
+  actor: Recipient;
+  data: SeatClaimedData;
+};
+
+export const SEAT_CLAIMED_WORKFLOW = "seat-claimed";
+
+/**
+ * Tells the Team Admin a Student claimed a Seat: in-app feed only, so a big
+ * Team Licence doesn't fill their inbox.
+ */
+export async function notifySeatClaimed(
+  seatClaimed: SeatClaimed,
+  feed: FeedTransport = defaultChannels().feed
+): Promise<void> {
+  await deliver("Seat claimed", {
+    feed: () =>
+      feed.trigger(SEAT_CLAIMED_WORKFLOW, {
+        recipients: [seatClaimed.recipient],
+        actor: seatClaimed.actor,
+        data: seatClaimed.data,
+      }),
+  });
+}

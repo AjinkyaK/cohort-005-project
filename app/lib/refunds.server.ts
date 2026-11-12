@@ -17,7 +17,11 @@ import {
   RefundStatus,
 } from "~/db/schema";
 import { formatPrice } from "~/lib/utils";
-import type { RefundDecided, Recipient } from "~/lib/notifications.server";
+import type {
+  RefundDecided,
+  Recipient,
+  SeatClaimed,
+} from "~/lib/notifications.server";
 import {
   REFUND_COMPLETION_LIMIT,
   REFUND_WATCH_LIMIT_SECONDS,
@@ -127,7 +131,11 @@ export const SEAT_REFUNDED =
   "This seat is no longer available. Ask the person who shared it with you.";
 
 export type ClaimSeatResult =
-  | { ok: true; enrollment: typeof enrollments.$inferSelect }
+  | {
+      ok: true;
+      enrollment: typeof enrollments.$inferSelect;
+      seatClaimed: SeatClaimed;
+    }
   | { ok: false; error: string };
 
 /**
@@ -136,6 +144,9 @@ export type ClaimSeatResult =
  * Seat doesn't exist, is already claimed, isn't available (on hold or
  * refunded), the Student is already enrolled, or the Student is in a different
  * country from the Team Licence's buyer.
+ *
+ * Also returns what the Team Admin (the Team Licence's buyer) is told, with
+ * the claimed/total Seat counts as of just after this claim.
  */
 export function claimSeat(
   db: Db,
@@ -196,8 +207,38 @@ export function claimSeat(
       .returning()
       .get();
 
-    return { ok: true, enrollment };
+    return {
+      ok: true,
+      enrollment,
+      seatClaimed: buildSeatClaimed(tx, seat.purchaseId, studentId),
+    };
   });
+}
+
+/** What the Team Admin is told, read after the claim inside its transaction. */
+function buildSeatClaimed(
+  db: Queryable,
+  purchaseId: number,
+  studentId: number
+): SeatClaimed {
+  const purchase = getPurchase(db, purchaseId);
+  const seats = getSeats(db, purchaseId);
+  const course = purchase
+    ? db.select().from(courses).where(eq(courses.id, purchase.courseId)).get()
+    : undefined;
+  const student = toRecipient(db, studentId);
+
+  return {
+    recipient: toRecipient(db, purchase?.userId ?? 0),
+    actor: student,
+    data: {
+      student_name: student.name,
+      course_title: course?.title ?? "",
+      claimed: seats.filter(isClaimed).length,
+      total: seats.length,
+      url: "/team",
+    },
+  };
 }
 
 // ─── Figures and rules ───
