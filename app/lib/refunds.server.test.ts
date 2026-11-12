@@ -6,6 +6,7 @@ import { LessonProgressStatus, RefundStatus, UserRole } from "~/db/schema";
 import {
   approveRefundRequest,
   checkRefundRequest,
+  claimSeat,
   declineRefundRequest,
   getRefundOffer,
   getSeatAvailability,
@@ -112,7 +113,7 @@ function buySeats(userId: number, seats: number, daysAgo = 3) {
   return { purchase, seats: seatRows };
 }
 
-function claimSeat(seatId: number, userId: number) {
+function markSeatClaimed(seatId: number, userId: number) {
   db.update(schema.coupons)
     .set({ redeemedByUserId: userId, redeemedAt: daysBefore(1) })
     .where(eq(schema.coupons.id, seatId))
@@ -228,11 +229,111 @@ describe("raising a Refund Request", () => {
   it("refuses a Team Licence with a Claimed Seat", () => {
     const teamAdmin = addLearner("Priya");
     const { purchase, seats } = buySeats(teamAdmin.id, 3);
-    claimSeat(seats[0].id, addLearner("Ben").id);
+    markSeatClaimed(seats[0].id, addLearner("Ben").id);
 
     expect(checkRefundRequest(db, purchase.id, teamAdmin.id, NOW)).toMatchObject({
       ok: false,
       status: 403,
+    });
+  });
+});
+
+describe("telling Platform Admins a Refund Request was raised", () => {
+  it("tells every Platform Admin, from the buyer, with the whole reason", () => {
+    const secondAdmin = db
+      .insert(schema.users)
+      .values({ name: "Sam Admin", email: "sam@example.com", role: UserRole.Admin })
+      .returning()
+      .get();
+    const purchase = buyForSelf(base.user.id);
+    const reason = "It was not what I expected. ".repeat(30).trim();
+
+    const result = raiseRefundRequest(db, purchase.id, base.user.id, reason, NOW);
+    if (!result.ok) throw new Error(result.error);
+
+    expect(result.refundRaised.recipients).toEqual([
+      { id: String(platformAdmin.id), name: "Pat Admin", email: "pat@example.com" },
+      { id: String(secondAdmin.id), name: "Sam Admin", email: "sam@example.com" },
+    ]);
+    expect(result.refundRaised.actor).toEqual({
+      id: String(base.user.id),
+      name: "Test User",
+      email: "test@example.com",
+    });
+    expect(result.refundRaised.data).toEqual({
+      buyer_name: "Test User",
+      course_title: "Test Course",
+      amount: "$79.00",
+      reason,
+      url: "/admin/refunds",
+    });
+  });
+
+  it("tells a Platform Admin who raised it on their own Purchase too", () => {
+    const purchase = buyForSelf(platformAdmin.id);
+
+    const result = raiseRefundRequest(db, purchase.id, platformAdmin.id, "Bought it twice.", NOW);
+    if (!result.ok) throw new Error(result.error);
+
+    expect(result.refundRaised.recipients.map((r) => r.id)).toEqual([
+      String(platformAdmin.id),
+    ]);
+    expect(result.refundRaised.actor.id).toBe(String(platformAdmin.id));
+  });
+
+  it("emails each Platform Admin about an Individual Purchase", () => {
+    const purchase = buyForSelf(base.user.id);
+
+    const result = raiseRefundRequest(db, purchase.id, base.user.id, "Not for me.", NOW);
+    if (!result.ok) throw new Error(result.error);
+
+    expect(result.refundRaised.emails).toEqual([
+      {
+        to: "pat@example.com",
+        subject: "New refund request — Test Course",
+        body: [
+          'Test User has asked for a refund on "Test Course" (Individual Purchase, $79.00).',
+          "",
+          "Their reason:",
+          "Not for me.",
+          "",
+          "Decide it under Admin → Refund Requests.",
+        ].join("\n"),
+      },
+    ]);
+  });
+
+  it("emails the Seat count for a Team Licence", () => {
+    const teamAdmin = addLearner("Priya");
+    const { purchase } = buySeats(teamAdmin.id, 3);
+
+    const result = raiseRefundRequest(db, purchase.id, teamAdmin.id, "Team changed plans.", NOW);
+    if (!result.ok) throw new Error(result.error);
+
+    expect(result.refundRaised.emails[0].body).toContain(
+      'Priya has asked for a refund on "Test Course" (Team Licence of 3 Seats, $237.00).'
+    );
+  });
+
+  it("leaves the buyer's acknowledgement email as it was", () => {
+    const purchase = buyForSelf(base.user.id);
+
+    const result = raiseRefundRequest(db, purchase.id, base.user.id, "Not for me.", NOW);
+    if (!result.ok) throw new Error(result.error);
+
+    expect(result.email).toEqual({
+      to: "test@example.com",
+      subject: "Refund requested — Test Course",
+      body: [
+        "Hi Test User,",
+        "",
+        'We have your refund request for "Test Course".',
+        "The refund is for $79.00, the amount you paid.",
+        "",
+        "Our team reviews every refund request by hand. You do not need to do anything else — we will email you again when it is done.",
+        "",
+        "— The Cadence team",
+      ].join("\n"),
     });
   });
 });
@@ -297,7 +398,7 @@ describe("approving a Refund Request", () => {
     const priya = addLearner("Priya");
     const { seats } = buySeats(priya.id, 2);
     // Liam claims a Seat first, so his Enrollment came from it.
-    claimSeat(seats[0].id, base.user.id);
+    markSeatClaimed(seats[0].id, base.user.id);
     const purchase = db
       .insert(schema.purchases)
       .values({
@@ -333,7 +434,7 @@ describe("approving a Refund Request", () => {
     const { purchase, seats } = buySeats(priya.id, 2);
     const id = raise(purchase.id, priya.id);
     // Seats are on hold while Open, but older data can still hold a claim.
-    claimSeat(seats[0].id, addLearner("Ben").id);
+    markSeatClaimed(seats[0].id, addLearner("Ben").id);
 
     expect(approveRefundRequest(db, id, platformAdmin.id, null, NOW)).toMatchObject({
       ok: false,
@@ -366,6 +467,69 @@ describe("approving a Refund Request", () => {
     expect(result.email.to).toBe("test@example.com");
     expect(result.email.subject).toBe("Refund approved — Test Course");
     expect(result.email.body).toContain("$79.00");
+  });
+
+  it("tells the buyer, from the deciding Platform Admin, with the whole note and a link to their settings", () => {
+    const purchase = buyForSelf(base.user.id);
+    const id = raise(purchase.id, base.user.id);
+    const note = "Approved. ".repeat(200).trim();
+
+    const result = approveRefundRequest(db, id, platformAdmin.id, note, NOW);
+
+    if (!result.ok) throw new Error(result.error);
+    expect(result.refundDecided).toEqual({
+      recipient: {
+        id: String(base.user.id),
+        name: "Test User",
+        email: "test@example.com",
+      },
+      actor: {
+        id: String(platformAdmin.id),
+        name: "Pat Admin",
+        email: "pat@example.com",
+      },
+      data: {
+        decision: "approved",
+        course_title: "Test Course",
+        note,
+        amount: "$79.00",
+        purchase_kind: "individual_purchase",
+        seats_note: null,
+        url: "/settings",
+      },
+    });
+  });
+
+  it("tells a Team Admin their Unclaimed Seats can no longer be claimed, linking to the team page", () => {
+    const priya = addLearner("Priya");
+    const { purchase } = buySeats(priya.id, 2);
+    const id = raise(purchase.id, priya.id);
+
+    const result = approveRefundRequest(db, id, platformAdmin.id, null, NOW);
+
+    if (!result.ok) throw new Error(result.error);
+    expect(result.refundDecided.recipient.id).toBe(String(priya.id));
+    expect(result.refundDecided.data).toMatchObject({
+      decision: "approved",
+      note: null,
+      amount: "$158.00",
+      purchase_kind: "team_licence",
+      seats_note: "Its Unclaimed Seats can no longer be claimed.",
+      url: "/team",
+    });
+    expect(result.email.body).toContain(
+      "Its Unclaimed Seats can no longer be claimed."
+    );
+  });
+
+  it("does not mention Seats when approving an Individual Purchase", () => {
+    const purchase = buyForSelf(base.user.id);
+    const id = raise(purchase.id, base.user.id);
+
+    const result = approveRefundRequest(db, id, platformAdmin.id, null, NOW);
+
+    if (!result.ok) throw new Error(result.error);
+    expect(result.email.body).not.toContain("Seats");
   });
 });
 
@@ -407,6 +571,44 @@ describe("declining a Refund Request", () => {
     declineRefundRequest(db, id, platformAdmin.id, "Seats are in use.", NOW);
 
     expect(getSeatAvailability(db, getSeat(seats[0].id))).toBe("available");
+  });
+
+  it("tells the buyer it was declined, with the whole note", () => {
+    const priya = addLearner("Priya");
+    const { purchase } = buySeats(priya.id, 1);
+    const id = raise(purchase.id, priya.id);
+
+    const result = declineRefundRequest(
+      db,
+      id,
+      platformAdmin.id,
+      "  Seats are in use.  ",
+      NOW
+    );
+
+    if (!result.ok) throw new Error(result.error);
+    expect(result.refundDecided).toEqual({
+      recipient: {
+        id: String(priya.id),
+        name: "Priya",
+        email: "priya@example.com",
+      },
+      actor: {
+        id: String(platformAdmin.id),
+        name: "Pat Admin",
+        email: "pat@example.com",
+      },
+      data: {
+        decision: "declined",
+        course_title: "Test Course",
+        note: "Seats are in use.",
+        amount: "$79.00",
+        purchase_kind: "team_licence",
+        seats_note: null,
+        url: "/team",
+      },
+    });
+    expect(result.email.body).not.toContain("Unclaimed Seats");
   });
 });
 
@@ -494,11 +696,146 @@ describe("listing Refund Requests", () => {
     const priya = addLearner("Priya");
     buySeats(priya.id, 2);
     const { seats } = buySeats(priya.id, 2);
-    claimSeat(seats[0].id, addLearner("Ben").id);
+    markSeatClaimed(seats[0].id, addLearner("Ben").id);
 
     expect(listTeamLicences(db, priya.id, NOW)).toMatchObject([
       { seatCount: 2, claimedSeatCount: 1, canRequestRefund: false },
       { seatCount: 2, claimedSeatCount: 0, canRequestRefund: true },
     ]);
+  });
+});
+
+describe("claiming a Seat", () => {
+  it("makes the Seat a Claimed Seat and enrols the Student", () => {
+    const priya = addLearner("Priya");
+    const ben = addLearner("Ben");
+    const { seats } = buySeats(priya.id, 2);
+
+    const result = claimSeat(db, seats[0].code, ben.id, "", NOW);
+
+    if (!result.ok) throw new Error(result.error);
+    expect(result.enrollment).toMatchObject({
+      userId: ben.id,
+      courseId: base.course.id,
+    });
+    expect(getSeat(seats[0].id)).toMatchObject({
+      redeemedByUserId: ben.id,
+      redeemedAt: NOW.toISOString(),
+    });
+    expect(getSeatAvailability(db, getSeat(seats[0].id))).toBe("claimed");
+    expect(isEnrolled(ben.id)).toBe(true);
+  });
+
+  it("tells the Team Admin who claimed it and how many Seats are now claimed", () => {
+    const priya = addLearner("Priya");
+    const ben = addLearner("Ben");
+    const { seats } = buySeats(priya.id, 3);
+    markSeatClaimed(seats[1].id, addLearner("Ana").id);
+
+    const result = claimSeat(db, seats[0].code, ben.id, "", NOW);
+
+    if (!result.ok) throw new Error(result.error);
+    expect(result.seatClaimed).toEqual({
+      recipient: { id: String(priya.id), name: "Priya", email: "priya@example.com" },
+      actor: { id: String(ben.id), name: "Ben", email: "ben@example.com" },
+      data: {
+        student_name: "Ben",
+        course_title: "Test Course",
+        claimed: 2,
+        total: 3,
+        url: "/team",
+      },
+    });
+  });
+
+  it("tells the Team Admin when they claim a Seat on their own Team Licence", () => {
+    const priya = addLearner("Priya");
+    const { seats } = buySeats(priya.id, 2);
+
+    const result = claimSeat(db, seats[0].code, priya.id, "", NOW);
+
+    if (!result.ok) throw new Error(result.error);
+    expect(result.seatClaimed).toMatchObject({
+      recipient: { id: String(priya.id) },
+      actor: { id: String(priya.id) },
+      data: { student_name: "Priya", claimed: 1, total: 2 },
+    });
+  });
+
+  it("refuses a code that isn't a Seat", () => {
+    expect(claimSeat(db, "NO-SUCH-SEAT", base.user.id, "", NOW)).toEqual({
+      ok: false,
+      error: "Coupon not found",
+    });
+  });
+
+  it("refuses a Seat that is already claimed", () => {
+    const priya = addLearner("Priya");
+    const { seats } = buySeats(priya.id, 1);
+    markSeatClaimed(seats[0].id, addLearner("Ben").id);
+
+    expect(claimSeat(db, seats[0].code, base.user.id, "", NOW)).toEqual({
+      ok: false,
+      error: "Coupon has already been redeemed",
+    });
+    expect(isEnrolled(base.user.id)).toBe(false);
+  });
+
+  it("refuses a Seat on hold while its Team Licence has an Open Refund Request", () => {
+    const priya = addLearner("Priya");
+    const { purchase, seats } = buySeats(priya.id, 1);
+    raise(purchase.id, priya.id);
+
+    expect(claimSeat(db, seats[0].code, base.user.id, "", NOW)).toEqual({
+      ok: false,
+      error:
+        "This seat can't be claimed right now. Ask the person who shared it with you.",
+    });
+    expect(getSeatAvailability(db, getSeat(seats[0].id))).toBe("on_hold");
+    expect(isEnrolled(base.user.id)).toBe(false);
+  });
+
+  it("refuses a Seat whose Team Licence Refund Request was approved", () => {
+    const priya = addLearner("Priya");
+    const { purchase, seats } = buySeats(priya.id, 1);
+    approveRefundRequest(db, raise(purchase.id, priya.id), platformAdmin.id, null, NOW);
+
+    expect(claimSeat(db, seats[0].code, base.user.id, "", NOW)).toEqual({
+      ok: false,
+      error:
+        "This seat is no longer available. Ask the person who shared it with you.",
+    });
+    expect(isEnrolled(base.user.id)).toBe(false);
+  });
+
+  it("refuses a Student already enrolled in the course", () => {
+    const priya = addLearner("Priya");
+    const { seats } = buySeats(priya.id, 1);
+    buyForSelf(base.user.id);
+
+    expect(claimSeat(db, seats[0].code, base.user.id, "", NOW)).toEqual({
+      ok: false,
+      error: "You are already enrolled in this course",
+    });
+    expect(getSeatAvailability(db, getSeat(seats[0].id))).toBe("available");
+  });
+
+  it("refuses a Student in a different country from the buyer, saving nothing", () => {
+    const priya = addLearner("Priya");
+    const { purchase, seats } = buySeats(priya.id, 1);
+    db.update(schema.purchases)
+      .set({ country: "IN" })
+      .where(eq(schema.purchases.id, purchase.id))
+      .run();
+
+    expect(claimSeat(db, seats[0].code, base.user.id, "US", NOW)).toEqual({
+      ok: false,
+      error:
+        "This coupon can only be redeemed from the same country as the purchaser",
+    });
+    expect(getSeatAvailability(db, getSeat(seats[0].id))).toBe("available");
+    expect(isEnrolled(base.user.id)).toBe(false);
+
+    expect(claimSeat(db, seats[0].code, base.user.id, "IN", NOW).ok).toBe(true);
   });
 });
