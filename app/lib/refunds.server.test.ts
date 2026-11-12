@@ -623,6 +623,42 @@ describe("claiming a Seat", () => {
     expect(isEnrolled(ben.id)).toBe(true);
   });
 
+  it("tells the Team Admin who claimed it and how many Seats are now claimed", () => {
+    const priya = addLearner("Priya");
+    const ben = addLearner("Ben");
+    const { seats } = buySeats(priya.id, 3);
+    markSeatClaimed(seats[1].id, addLearner("Ana").id);
+
+    const result = claimSeat(db, seats[0].code, ben.id, "", NOW);
+
+    if (!result.ok) throw new Error(result.error);
+    expect(result.seatClaimed).toEqual({
+      recipient: { id: String(priya.id), name: "Priya", email: "priya@example.com" },
+      actor: { id: String(ben.id), name: "Ben", email: "ben@example.com" },
+      data: {
+        student_name: "Ben",
+        course_title: "Test Course",
+        claimed: 2,
+        total: 3,
+        url: "/team",
+      },
+    });
+  });
+
+  it("tells the Team Admin when they claim a Seat on their own Team Licence", () => {
+    const priya = addLearner("Priya");
+    const { seats } = buySeats(priya.id, 2);
+
+    const result = claimSeat(db, seats[0].code, priya.id, "", NOW);
+
+    if (!result.ok) throw new Error(result.error);
+    expect(result.seatClaimed).toMatchObject({
+      recipient: { id: String(priya.id) },
+      actor: { id: String(priya.id) },
+      data: { student_name: "Priya", claimed: 1, total: 2 },
+    });
+  });
+
   it("refuses a code that isn't a Seat", () => {
     expect(claimSeat(db, "NO-SUCH-SEAT", base.user.id, "", NOW)).toEqual({
       ok: false,

@@ -3,8 +3,10 @@ import type { Email, MailTransport } from "~/lib/mailer.server";
 import {
   knockConfig,
   notifyRefundDecided,
+  notifySeatClaimed,
   type FeedTransport,
   type RefundDecided,
+  type SeatClaimed,
 } from "./notifications.server";
 
 type Trigger = { workflow: string; args: Parameters<FeedTransport["trigger"]>[1] };
@@ -148,5 +150,48 @@ describe("knockConfig", () => {
     for (const missing of Object.keys(complete)) {
       expect(knockConfig({ ...complete, [missing]: undefined })).toBeNull();
     }
+  });
+});
+
+describe("notifySeatClaimed", () => {
+  const seatClaimed: SeatClaimed = {
+    recipient: { id: "7", name: "Priya", email: "priya@example.com" },
+    actor: { id: "9", name: "Ben", email: "ben@example.com" },
+    data: {
+      student_name: "Ben",
+      course_title: "Test Course",
+      claimed: 2,
+      total: 3,
+      url: "/team",
+    },
+  };
+
+  it("puts the claim in the Team Admin's feed, from the Student who claimed", async () => {
+    const { feed, triggers } = recordingFeed();
+
+    await notifySeatClaimed(seatClaimed, feed);
+
+    expect(triggers).toEqual([
+      {
+        workflow: "seat-claimed",
+        args: {
+          recipients: [{ id: "7", name: "Priya", email: "priya@example.com" }],
+          actor: { id: "9", name: "Ben", email: "ben@example.com" },
+          data: {
+            student_name: "Ben",
+            course_title: "Test Course",
+            claimed: 2,
+            total: 3,
+            url: "/team",
+          },
+        },
+      },
+    ]);
+  });
+
+  it("resolves when the feed fails", async () => {
+    await expect(
+      notifySeatClaimed(seatClaimed, failingFeed())
+    ).resolves.toBeUndefined();
   });
 });
