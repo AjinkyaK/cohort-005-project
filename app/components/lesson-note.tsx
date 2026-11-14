@@ -26,7 +26,7 @@ export function LessonNote({
 
   return (
     <Card className="mb-8">
-      <CardContent className="px-6">
+      <CardContent className="p-6">
         <NoteHeader />
 
         <fetcher.Form method="post" className="space-y-2">
