@@ -132,6 +132,14 @@ jobs:
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: Install agent-browser
+        # The agent drives the app with it: docs/agents/agent-browser.md. The
+        # runner already has Chrome, so agent-browser uses that rather than
+        # downloading its own.
+        run: |
+          npm install -g agent-browser@0.43.0
+          echo "AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome" >> "$GITHUB_ENV"
+
       - name: Migrate and seed the database
         # The agent gets a real database, because half of this repo's checks
         # need one. It is disposable: a fresh one, migrated and seeded, on
@@ -257,6 +265,21 @@ jobs:
             --body-file "$body_file" \
             "${attach[@]}")"
           echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the agent's work
+        # After the push, so a failure here never loses the agent's work: the
+        # run goes red and the ticket gets `agent:blocked`. Runs code the
+        # agent wrote, so no token.
+        #   build: the one check that catches a server-only module imported
+        #     by client code.
+        #   lint exemptions: .oxlintrc.json's exemption lists only shrink.
+        #     Code that breaks a lint rule gets fixed, not listed.
+        env:
+          BASE: ${{ steps.branch.outputs.base }}
+        run: |
+          set -euo pipefail
+          npm run build
+          node scripts/check-lint-exemptions.js "$BASE"
 
       - name: Mark blocked on failure
         if: failure()

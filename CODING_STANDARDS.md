@@ -20,6 +20,14 @@ a type and you do not check it again. Coerce numbers through the schema, not
 `Number()`: `Number("")` is `0`, and an empty `lessonId` once opened lesson 0
 for every learner.
 
+## Write a validation rule once, for client and server
+
+When the browser checks input before sending it (a length limit, a required
+field, trimming), it calls the same function the server's schema uses, from
+the module that owns the data. The lesson notes card trimmed and measured the
+draft itself, while `saveNote` trimmed and measured it again, so changing the
+limit meant two edits that could drift apart.
+
 ## Check permission in the action, not only the loader
 
 A loader guard does not protect an action. They are separate requests. For a
@@ -41,10 +49,6 @@ instructor analytics route only; apply it to every other module by hand. See
 Test setup calls the module's own functions. When the function you need does
 not exist, add it to the module rather than inserting rows directly, so a
 change to how the module stores its data leaves its tests alone.
-
-## Keep files under 5000 tokens
-
-Keep every file under 5000 tokens.
 
 ## Wrap related writes in a transaction
 
