@@ -38,7 +38,7 @@ export function LessonNote({
             onChange={(event) => setBody(event.target.value)}
             placeholder="Key ideas, questions to come back to, code to try..."
             aria-label="Your notes"
-            aria-invalid={draft.overLimit || undefined}
+            aria-invalid={draft.status === "over-limit" || undefined}
             className="min-h-28 resize-y"
           />
           <div className="flex items-center gap-3">
@@ -67,7 +67,9 @@ function NoteLength({ draft }: { draft: NoteDraft }) {
     <span
       className={cn(
         "ml-auto text-xs tabular-nums",
-        draft.overLimit ? "text-destructive" : "text-muted-foreground"
+        draft.status === "over-limit"
+          ? "text-destructive"
+          : "text-muted-foreground"
       )}
     >
       {draft.length} / {MAX_NOTE_LENGTH}

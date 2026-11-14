@@ -6,8 +6,6 @@ describe("describeNoteDraft", () => {
   it("cannot save an empty draft when nothing is saved yet", () => {
     expect(describeNoteDraft("", null)).toEqual({
       length: 0,
-      remaining: MAX_NOTE_LENGTH,
-      overLimit: false,
       status: "empty",
       canSave: false,
     });
@@ -22,8 +20,6 @@ describe("describeNoteDraft", () => {
   it("can save a new draft", () => {
     expect(describeNoteDraft("Generics are like parameters", null)).toEqual({
       length: 28,
-      remaining: MAX_NOTE_LENGTH - 28,
-      overLimit: false,
       status: "unsaved",
       canSave: true,
     });
@@ -61,8 +57,7 @@ describe("describeNoteDraft", () => {
 
   it("accepts a draft of exactly the limit", () => {
     const draft = describeNoteDraft("a".repeat(MAX_NOTE_LENGTH), null);
-    expect(draft.remaining).toBe(0);
-    expect(draft.overLimit).toBe(false);
+    expect(draft.status).toBe("unsaved");
     expect(draft.canSave).toBe(true);
   });
 
@@ -70,8 +65,6 @@ describe("describeNoteDraft", () => {
     const draft = describeNoteDraft("a".repeat(MAX_NOTE_LENGTH + 3), null);
     expect(draft).toEqual({
       length: MAX_NOTE_LENGTH + 3,
-      remaining: -3,
-      overLimit: true,
       status: "over-limit",
       canSave: false,
     });
@@ -80,6 +73,6 @@ describe("describeNoteDraft", () => {
   it("counts the trimmed length, as that is what is saved", () => {
     const draft = describeNoteDraft(`  ${"a".repeat(MAX_NOTE_LENGTH)}  `, null);
     expect(draft.length).toBe(MAX_NOTE_LENGTH);
-    expect(draft.overLimit).toBe(false);
+    expect(draft.status).toBe("unsaved");
   });
 });

@@ -4,8 +4,6 @@ export type NoteDraftStatus = "empty" | "unsaved" | "saved" | "over-limit";
 
 export type NoteDraft = {
   length: number;
-  remaining: number;
-  overLimit: boolean;
   status: NoteDraftStatus;
   canSave: boolean;
 };
@@ -15,13 +13,10 @@ export type NoteDraft = {
 export function noteDraft(draft: string, savedBody: string | null): NoteDraft {
   const body = draft.trim();
   const length = body.length;
-  const overLimit = length > MAX_NOTE_LENGTH;
-  const status = draftStatus(body, savedBody, overLimit);
+  const status = draftStatus(body, savedBody, length > MAX_NOTE_LENGTH);
 
   return {
     length,
-    remaining: MAX_NOTE_LENGTH - length,
-    overLimit,
     status,
     canSave: status === "unsaved" && length > 0,
   };
