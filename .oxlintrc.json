@@ -150,7 +150,6 @@
         "app/components/comment-thread.tsx",
         "app/components/curriculum-sidebar.tsx",
         "app/components/dev-ui.tsx",
-        "app/components/lesson-progression.tsx",
         "app/components/locked-lesson.tsx",
         "app/components/monaco-markdown-editor.tsx",
         "app/components/notification-feed.tsx",
