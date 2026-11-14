@@ -12,6 +12,8 @@ npm install -g agent-browser
 agent-browser install
 ```
 
+The factory workflows install it on the runner for you.
+
 ## Asking your own question
 
 Start the app with `npm run dev` first. The examples below use
@@ -39,6 +41,26 @@ agent-browser get text main
 agent-browser errors
 agent-browser console
 ```
+
+## Signing in
+
+Most pages need a user. Switch to one the way the DevUI panel does, with a
+POST to `/api/switch-user` from inside the page, so the browser keeps the
+cookie:
+
+```bash
+agent-browser open http://localhost:5173/
+agent-browser eval "fetch('/api/switch-user',{method:'POST',body:new URLSearchParams({userId:'5'})}).then(r=>r.status)"
+agent-browser open http://localhost:5173/courses/introduction-to-typescript/lessons/1
+```
+
+In a freshly seeded database, user 5 (Emma Wilson) is a student enrolled in
+`introduction-to-typescript` and `building-rest-apis-with-nodejs`.
+
+`agent-browser close` drops the cookie and the viewport. After it, sign in
+again and reset the viewport (`set viewport 1440 1600`) before the next
+screenshot, or the after shot shows the signed-out page at a different size
+from the before shot.
 
 The commands worth knowing: `open`, `click`, `fill`,
 `find <role|text|label|placeholder> …`, `wait`, `get text|html|attr|count|url`,

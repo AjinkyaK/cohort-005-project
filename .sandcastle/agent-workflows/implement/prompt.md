@@ -10,7 +10,9 @@ Read CODING_STANDARDS.md.
   test can call, never inline in a loader.
 - Ship tests with the code. End with more passing tests than you started
   with, and none failing.
-- `npm run build` must pass too.
+- When code breaks a lint rule, change the code. Exemption lists in
+  `.oxlintrc.json` only shrink: the workflow fails the run on any new entry
+  (`npm run lint:exemptions`).
 - Commit with `git commit` on the current branch. When the pre-commit hook
   rejects a commit, fix the work and commit again. The hook stays as it is:
   no `--no-verify`, no edits to `.husky/`, `scripts/pre-commit.sh` or

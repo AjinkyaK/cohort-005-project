@@ -11,6 +11,10 @@ Leave the human reviewer as little as possible. Fix every finding you can on
 `{{BRANCH}}`, and commit each fix through the pre-commit hook. The workflow
 pushes your commits. Leave `.github/` untouched.
 
+When the PR adds an entry to an exemption list in `.oxlintrc.json`, remove it
+and fix the code to pass the rule. The workflow fails the run on any new entry
+left (`npm run lint:exemptions`).
+
 Every finding you leave unfixed becomes an inline comment on its file and
 line. You will be asked for them as structured output.
 

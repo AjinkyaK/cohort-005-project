@@ -163,6 +163,14 @@ jobs:
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: Install agent-browser
+        # The agent drives the app with it: docs/agents/agent-browser.md. The
+        # runner already has Chrome, so agent-browser uses that rather than
+        # downloading its own.
+        run: |
+          npm install -g agent-browser@0.43.0
+          echo "AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome" >> "$GITHUB_ENV"
+
       - name: Migrate and seed the database
         # The pre-commit hook runs on every commit the agent makes, and the
         # repo's checks need a database.
@@ -245,6 +253,21 @@ jobs:
             --body-file /tmp/review-fallback.md)"
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "number=${url##*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the agent's work
+        # After the push, so a failure here never loses the review's fixes:
+        # the run goes red, the PR gets `agent:blocked` and stays a draft.
+        # Runs code the PR and the agent wrote, so no token.
+        #   build: the one check that catches a server-only module imported
+        #     by client code.
+        #   lint exemptions: .oxlintrc.json's exemption lists only shrink.
+        #     Code that breaks a lint rule gets fixed, not listed.
+        run: |
+          set -euo pipefail
+          npm run build
+          # Against the merge-base: an exemption the base dropped since the
+          # PR branched is not one the PR added.
+          node scripts/check-lint-exemptions.js "$(git merge-base HEAD "origin/$BASE_REF")"
 
       - name: Post the verdict on the pull request
         if: always()
